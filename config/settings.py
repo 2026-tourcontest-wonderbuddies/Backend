@@ -43,8 +43,12 @@ INSTALLED_APPS = [
     # 새로 추가
     'rest_framework',
     'corsheaders',
+
     # 앱
-    # 'places',
+    'apps.places',
+    'apps.trips',
+    'apps.recommendation',
+    'apps.nlp',
 ]
 
 MIDDLEWARE = [
