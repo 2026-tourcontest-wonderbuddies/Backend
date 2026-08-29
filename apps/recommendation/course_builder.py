@@ -6,6 +6,10 @@ Pipeline 5.4~5.6 — 휴리스틱 빔서치 + Macro 평가로 하루치 코스�
   2. 빔서치로 완성 코스 10개 생성 (5.4)
   3. 완성 코스별 Macro 점수 계산 (5.5~5.6)
   4. 최고점 코스 1개 반환
+  *이전 Day에서 방문한 장소는 다음 Day 후보에서 제외
+  * 목표 슬롯을 채워도 필수 식사가 해결 안됐을 경우, 안전 상한(12곳)까지 탐색 확장
+
+  ?: 여유 시간이 많이 남는 문제 
 
 이동시간 컷(60분 초과), 시간예산 체크는 filters.py가 담당하고,
 이 모듈은 "여러 후보를 조합해서 코스 형태로 완성하는" 조립 로직에 집중한다.
@@ -14,11 +18,12 @@ Pipeline 5.4~5.6 — 휴리스틱 빔서치 + Macro 평가로 하루치 코스�
 from copy import deepcopy
 from apps.recommendation.filters import filter_candidates
 from apps.recommendation.scoring import score_candidate
-from apps.recommendation import food_scoring
+from apps.recommendation.food_scoring import apply_relax_penalty
 
 
 BEAM_WIDTH = 10          # 5.4 유지 코스 수 (계산량 부담되면 5로 축소 가능, 구조는 동일)
 TOP_K_EXPAND = 5         # 매 단계 확장 후보 수
+SAFETY_CAP_SLOTS = 12
 
 TARGET_SLACK = {"dist": 0.05, "pref": 0.10, "relax": 0.20}
 
@@ -38,6 +43,7 @@ class PartialCourse:
         self.current_time_min = start_time_min
         self.micro_scores = []          # SearchScore 계산용 누적치
         self.visited_ids = set()
+        self.meal_filled = {"lunch": False, "dinner": False}
         if start_place:
             self.visited_ids.add(start_place.content_id)
 
@@ -48,6 +54,7 @@ class PartialCourse:
         new.current_time_min = self.current_time_min
         new.micro_scores = list(self.micro_scores)
         new.visited_ids = set(self.visited_ids)
+        new.meal_filled = dict(self.meal_filled)
         return new
 
     def add(self, scored_candidate: dict, slot_type: str = "GENERAL"):
@@ -59,17 +66,20 @@ class PartialCourse:
             "stay_min": scored_candidate["stay_min"],
             "micro_score": scored_candidate["micro_score"],
             "slot_type": slot_type,
+            "hours_uncertain": scored_candidate.get("hours_uncertain", False),
         })
         self.current_time_min += scored_candidate["travel_min"] + scored_candidate["stay_min"]
         self.current_place = place
         self.visited_ids.add(place.content_id)
         self.micro_scores.append(scored_candidate["micro_score"])
+        if slot_type == "RESTAURANT":
+            if not self.meal_filled["lunch"]:
+                self.meal_filled["lunch"] = True
+            else:
+                self.meal_filled["dinner"] = True
 
     def search_score(self) -> float:
-        """5.4-② SearchScore(R) = 누적 Micro 점수 평균."""
-        if not self.micro_scores:
-            return 0.0
-        return sum(self.micro_scores) / len(self.micro_scores)
+        return sum(self.micro_scores) / len(self.micro_scores) if self.micro_scores else 0.0
 
 
 def beam_search_day(
@@ -81,11 +91,15 @@ def beam_search_day(
     purpose_main: str,
     purpose_sub: str,
     transport_mode: str,
+    region_quadrant: str,
     exclude_place_ids: list,
     exclude_categories: list,
     visit_start_datetime,
     get_travel_time_fn,
     get_stay_time_fn,
+    need_lunch: bool = False,
+    need_dinner: bool = False,
+    visited_across_days: set[str] = None,
     nlp_match_score: float | None = None,
 ) -> list[PartialCourse]:
     """
@@ -98,11 +112,18 @@ def beam_search_day(
     문서 규칙(§음식점로직-2 "음식 슬롯에서는 지정된 food_type 후보끼리만 비교")을 지키기 위함).
     """
     avail_min = avail_hours * 60
+    visited_across_days = visited_across_days or set()
     beams = [PartialCourse(start_place, start_time_min=0)]
 
     while True:
+        def _done(b):
+            slot_ok = len(b.items) >= target_slots
+            meal_ok = (not need_lunch or b.meal_filled["lunch"]) and (not need_dinner or b.meal_filled["dinner"])
+            hit_cap = len(b.items) >= SAFETY_CAP_SLOTS
+            return (slot_ok and meal_ok) or hit_cap
+
         # 종료 조건: 목표 슬롯 수를 채웠거나, 모든 빔이 더 이상 확장 불가
-        if all(len(b.items) >= target_slots for b in beams):
+        if all(_done(b) for b in beams):
             break
 
         new_beams = []
@@ -110,10 +131,11 @@ def beam_search_day(
 
         for beam in beams:
             remain_time = avail_min - beam.current_time_min
-            if remain_time <= 0 or len(beam.items) >= target_slots:
+            if remain_time <= 0 or _done(beam):
                 new_beams.append(beam)  # 더 확장 안 하고 그대로 유지
                 continue
 
+            excluded_ids = beam.visited_ids | visited_across_days
             # 이미 방문한 장소는 후보에서 제외
             fresh_candidates = [p for p in candidate_pool if p.content_id not in beam.visited_ids]
 
@@ -123,6 +145,7 @@ def beam_search_day(
                 visit_datetime=visit_start_datetime,  # 단순화: 실제로는 beam.current_time_min을 datetime에 더해야 정확함
                 remain_time_min=remain_time,
                 transport_mode=transport_mode,
+                region_quadrant=region_quadrant,
                 exclude_place_ids=exclude_place_ids,
                 exclude_categories=exclude_categories,
                 get_travel_time_fn=get_travel_time_fn,
@@ -134,7 +157,7 @@ def beam_search_day(
                 for c in filtered
             ]
             scored.sort(key=lambda x: x["micro_score"], reverse=True)
-            top5 = scored[:TOP_K_EXPAND]   # ① Top5 확장
+            top5 = scored[:TOP_K_EXPAND]   # Top5 확장
 
             if not top5:
                 new_beams.append(beam)  # 확장할 게 없으면 현재 상태로 종료
@@ -146,7 +169,7 @@ def beam_search_day(
                 branched.add(candidate)
                 new_beams.append(branched)
 
-        # ③ 가지치기: SearchScore 상위 BEAM_WIDTH개만 유지
+        # 가지치기: SearchScore 상위 BEAM_WIDTH개만 유지
         new_beams.sort(key=lambda b: b.search_score(), reverse=True)
         beams = new_beams[:BEAM_WIDTH]
 
@@ -156,8 +179,8 @@ def beam_search_day(
     return beams
 
 
-def calc_move_eff(total_travel_min: float, avail_min: float) -> float:
-    """5.5-② MoveEff. 이동비율 35% 이상이면 0점(해당 코스 원천 제외 대상)."""
+def calc_move_eff(total_travel_min, avail_min):
+    """5.5-MoveEff. 이동비율 35% 이상이면 0점(해당 코스 원천 제외 대상)."""
     if avail_min <= 0:
         return 0.0
     move_ratio = total_travel_min / avail_min
@@ -165,8 +188,8 @@ def calc_move_eff(total_travel_min: float, avail_min: float) -> float:
     return 100 * max(0, min(1, raw))
 
 
-def calc_slack_score(total_used_min: float, avail_min: float, mode: str) -> float:
-    """5.5-③ SlackScore."""
+def calc_slack_score(total_used_min, avail_min, mode):
+    """5.5-SlackScore."""
     target_slack = TARGET_SLACK[mode]
     slack_ratio = max(avail_min - total_used_min, 0) / avail_min if avail_min > 0 else 0
     return 100 * min(slack_ratio / target_slack, 1.0)

@@ -234,3 +234,37 @@ if __name__ == "__main__":
 
     print("15분 격자 스냅 테스트:", snap_to_15min(40), snap_to_15min(50))
     # 기대값: 45, 45 (40→45반올림, 50→45반올림... 실제론 round(50/15)*15=45)
+
+
+    # 권역(4분면) 분류
+    # 한라산 정상 좌표를 기준점으로 위/경도만 비교하는 방식
+    
+    HALLASAN_LAT = 33.3617   # 한라산 정상 기준점
+    HALLASAN_LNG = 126.5292
+
+
+    def classify_quadrant(latitude: float, longitude: float) -> str:
+        """
+        위경도를 한라산 정상 기준으로 비교해서 4분면 중 하나를 반환.
+        Returns: "NE"(북동) | "NW"(북서) | "SE"(남동) | "SW"(남서)
+
+        import_tour_api 커맨드에서 Place.quadrant를 채울 때 이 함수를 호출한다.
+        """
+        is_north = latitude >= HALLASAN_LAT
+        is_east = longitude >= HALLASAN_LNG
+
+        if is_north and is_east:
+            return "NE"
+        if is_north and not is_east:
+            return "NW"
+        if not is_north and is_east:
+            return "SE"
+        return "SW"
+
+
+    # ── 최소 동작 확인 ──────────────────────────────────────────
+    if __name__ == "__main__":
+        # 성산일출봉(동쪽, 남쪽) → SE 기대
+        print(classify_quadrant(33.4587, 126.9425))
+        # 한림공원(서쪽, 북쪽) → NW 기대
+        print(classify_quadrant(33.4966, 126.2419))

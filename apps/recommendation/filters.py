@@ -8,34 +8,43 @@ from datetime import datetime, timedelta
 WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
 
 
-def is_open_at(place, visit_datetime: datetime) -> bool:
+def is_open_at(place, visit_datetime: datetime) -> tuple[bool, bool]:
     """
     영업시간·휴무일 하드필터 (5.1-① 영업 조건).
 
-    Args:
-        place: Place 인스턴스 (open_time, close_time, closed_weekdays 필드 사용)
-        visit_datetime: 방문 예정 일시
-
     Returns:
-        영업 중이면 True, 휴무일이거나 영업시간 외면 False
-
-    주의: open_time/close_time이 아직 파싱 안 된 장소(hours_raw만 있고 null)는
-    일단 통과시킨다 — 데이터 부족으로 무조건 탈락시키면 후보 풀이 과도하게 줄어든다.
+        (통과 여부, uncertain 여부)
+        - hours_status='always' → (True, False)
+        - hours_status='uncertain' → (True, True)  # 확인불가는 제외하지 않고 통과, 대신 표시
+        - hours_status='windows' → 실제 요일/시간 비교해서 판정 (False, False)면 하드 제외
     """
+    if place.hours_status == "uncertain":
+        return True, True
+
     weekday_str = WEEKDAY_MAP[visit_datetime.weekday()]
     if weekday_str in place.closed_weekdays:
-        return False
+        return False, False
 
-    # 운영시간 파싱이 안 된 경우(대부분 초기 상태) 통과 처리
-    if place.open_time is None or place.close_time is None:
+    if place.hours_status == "always":
+        return True, False
+
+    # hours_status == "windows"일 경우
+    windows = place.open_windows.get(weekday_str)
+    if not windows:
+        return True, True
+
+    visit_time_str = visit_datetime.strftime("%H:%M")
+    for start, end in windows:
+        if start <= visit_time_str <= end:
+            return True, False
+
+    return False, False
+
+
+def matches_quadrant(place, region_quadrant: str | None) -> bool:
+    if not region_quadrant:
         return True
-
-    visit_time = visit_datetime.time()
-    # 자정을 넘기는 영업시간(예: 22:00~02:00)은 별도 처리 필요하나
-    # 우선 일반적인 당일 영업시간만 처리 (야간 영업점 예외는 추후 보강)
-    if place.close_time >= place.open_time:
-        return place.open_time <= visit_time <= place.close_time
-    return visit_time >= place.open_time or visit_time <= place.close_time
+    return place.quadrant == region_quadrant
 
 
 def is_excluded(place, exclude_place_ids: list[str], exclude_categories: list[str]) -> bool:
@@ -81,52 +90,49 @@ def filter_candidates(
     visit_datetime: datetime,
     remain_time_min: float,
     transport_mode: str,
+    region_quadrant: str | None,
     exclude_place_ids: list[str],
     exclude_categories: list[str],
     get_travel_time_fn,      # routing_engine.get_travel_time을 감싼 콜러블 (아래 시그니처 참고)
     get_stay_time_fn,        # place.content_id -> stay_min(float)을 반환하는 콜러블
 ) -> list[dict]:
     """
-    Pipeline 5.1 전체를 한 번에 수행하는 진입점.
-
-    get_travel_time_fn(origin_id, destination_id) -> {"duration_min_adjusted": float, ...}
-    get_stay_time_fn(place) -> float  (PlaceStayStat.stay_med_15m 조회 래퍼)
-
-    Returns:
-        하드필터를 통과한 후보들의 리스트. 각 원소는
-        {"place": Place, "travel_min": float, "stay_min": float} 형태.
-        이 결과를 그대로 scoring.py의 Micro 평가에 넘긴다.
+    반환 dict에 "hours_uncertain" 추가 — course_builder가 최종 아이템에 표시 여부 전달용.
     """
     survivors = []
 
     for place in candidates:
-        # ① 영업시간·휴무일
-        if not is_open_at(place, visit_datetime):
+        if not matches_quadrant(place, region_quadrant):
             continue
 
-        # ② 사용자 제외 조건
+        is_open, uncertain = is_open_at(place, visit_datetime)
+        # 영업시간·휴무일
+        if not is_open:
+            continue
+
+        # 사용자 제외 조건
         if is_excluded(place, exclude_place_ids, exclude_categories):
             continue
 
-        # ③ 이동수단 제약 (주차 불가 등 명확한 케이스만 하드 제외)
+        # 이동수단 제약 (주차 불가 등 명확한 케이스만 하드 제외)
         if fails_transport_constraint(place, transport_mode):
             continue
 
-        # ④ 이동시간 계산 (현재 위치가 없으면 0으로 취급 — 코스 첫 장소인 경우)
+        # 이동시간 계산 (현재 위치가 없으면 0으로 취급 — 코스 첫 장소인 경우)
         if current_place is not None:
             travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
             travel_min = travel_result["duration_min_adjusted"]
         else:
             travel_min = 0.0
 
-        # ⑤ 이동시간 60분 초과 시 사전 컷 (5.2-③ CostMove 주석: 단일 이동 60분 초과는 Micro 평가 전 컷)
+        # 이동시간 60분 초과 시 사전 컷 (5.2-③ CostMove 주석: 단일 이동 60분 초과는 Micro 평가 전 컷)
         if travel_min > 60:
             continue
 
-        # ⑥ 체류시간 조회
+        # 체류시간 조회
         stay_min = get_stay_time_fn(place)
 
-        # ⑦ 가용시간 충족 여부
+        # 가용시간 충족 여부
         if not check_time_budget(travel_min, stay_min, remain_time_min):
             continue
 
@@ -134,12 +140,13 @@ def filter_candidates(
             "place": place,
             "travel_min": travel_min,
             "stay_min": stay_min,
+            "hours_uncertain": uncertain,
         })
 
     return survivors
 
 
-# ── 최소 동작 확인 ──────────────────────────────────────────
+# 최소 동작 확인 
 if __name__ == "__main__":
     # DB 없이 순수 로직만 확인하고 싶을 때 쓰는 더미 테스트.
     # 실제 Place 인스턴스가 필요한 함수(is_open_at 등)는 Django shell에서

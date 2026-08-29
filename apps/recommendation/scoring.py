@@ -11,31 +11,22 @@ Pipeline 5.2~5.3 — Micro 평가 (단일 장소 스코어링).
 스위치로 켜고 끌 수 있게 만들어둔다 (기본 off).
 """
 
-from apps.places.models import PlaceTagScore, PlaceStayStat
+MAIN_PURPOSE_THRESHOLD = 0.40
+SYNERGY_BONUS_WEIGHT = 0.20
+DYNAMIC_SWAP_TRIGGER = 0.80
 
 
-# 사용자 목적 6종 → PlaceTagScore 필드 매핑 키 (TripRequest.PURPOSE_CHOICES와 동일)
-PURPOSE_KEYS = ["nature", "food", "photo", "culture", "activity", "shopping"]
-
-MAIN_PURPOSE_THRESHOLD = 0.40   # 주목적 과락 기준 (5.2-① 방어로직 1번)
-SYNERGY_BONUS_WEIGHT = 0.20     # 시너지 보너스 계수
-DYNAMIC_SWAP_TRIGGER = 0.80     # 직전 장소 주목적 점수가 이 이상이면 가중치 스와핑 (기본 off)
-
-
-def get_purpose_match(tag_score: PlaceTagScore | None, purpose_key: str) -> float:
+def get_purpose_match(place, purpose_key: str) -> float:
     """
     장소의 목적 태그 점수(0~100)를 0~1로 정규화해서 반환.
     tag_score가 없으면(LLM 태깅 전) 0.5(중립)로 처리 — 완전히 0점 주면
     태깅 안 된 장소가 전부 탈락하게 되어 후보 풀이 텅 비는 걸 방지.
     """
-    if tag_score is None:
-        return 0.5
-    raw = tag_score.get_score(purpose_key)  # 0~100
-    return raw / 100.0
+    return place.get_purpose_score(purpose_key) / 100.0
 
 
 def calc_pref(
-    tag_score: PlaceTagScore | None,
+    place,
     purpose_main: str,
     purpose_sub: str | None,
     nlp_match_score: float | None = None,
@@ -54,13 +45,13 @@ def calc_pref(
     Returns:
         0.0 ~ 1.0 사이의 최종 Pref_k. 주목적 과락이면 0.0 반환.
     """
-    match_main = get_purpose_match(tag_score, purpose_main)
+    match_main = get_purpose_match(place, purpose_main)
 
     # 주목적 과락 — 이 이하면 다른 계산 없이 바로 0점 처리
     if match_main < MAIN_PURPOSE_THRESHOLD:
         return 0.0
 
-    match_sub = get_purpose_match(tag_score, purpose_sub) if purpose_sub else 0.0
+    match_sub = get_purpose_match(place, purpose_sub) if purpose_sub else 0.0
 
     # 가중치 결정: 기본 6:4, 동적 스와핑 조건 충족 시 4:6
     w_main, w_sub = 0.6, 0.4
@@ -75,21 +66,20 @@ def calc_pref(
 
     # 시너지 보너스 (주+보조 둘 다 높으면 가산, Clipping으로 1.0 초과 방지)
     synergy = (match_main * match_sub) * SYNERGY_BONUS_WEIGHT
-    pref_raw = pref_base + synergy
 
     return min(pref_raw, 1.0)
 
 
-def get_adjusted_qual(stay_stat: PlaceStayStat | None) -> float:
+def get_adjusted_qual(place) -> float:
     """
     Pipeline 5.2-② AdjustedQual_k.
     이미 팀원이 satisfaction_score(=AdjustedQual_k)로 계산해서 CSV에 넣어줬으므로
     여기서 다시 계산하지 않고 그대로 가져다 쓴다.
     stay_stat이 없거나 satisfaction_score가 null이면(관측 0건) 중립값 0.5 사용.
     """
-    if stay_stat is None or stay_stat.satisfaction_score is None:
+    if place.satisfaction_score is None:
         return 0.5
-    return stay_stat.satisfaction_score
+    return place.satisfaction_score
 
 
 def calc_cost_move(travel_min: float) -> float:
@@ -102,13 +92,12 @@ def calc_cost_move(travel_min: float) -> float:
 
 
 def calc_micro_score(
-    mode: str,
-    pref: float,
-    adjusted_qual: float,
-    cost_move: float,
-    travel_min: float,
-    stay_min: float,
-    remain_time_min: float,
+    mode, pref, 
+    adjusted_qual, 
+    cost_move, 
+    travel_min, 
+    stay_min, 
+    remain_time_min
 ) -> float:
     """
     Pipeline 5.3 — 코스 모드별 Micro 점수.
@@ -119,26 +108,25 @@ def calc_micro_score(
     if mode == "dist":
         # 이동시간 제곱 페널티 — 근거리 장소를 강하게 선호
         return 0.2 * pref + 0.3 * adjusted_qual - 0.5 * (cost_move ** 2)
-
     elif mode == "pref":
         # 취향·품질 우선, 이동 부담은 약하게만 반영
         return 0.5 * pref + 0.4 * adjusted_qual - 0.1 * cost_move
-
     elif mode == "relax":
         # 이동+체류가 잔여시간에서 차지하는 비중이 크면 감점
         time_ratio = (travel_min + stay_min) / remain_time_min if remain_time_min > 0 else 1.0
         return 0.3 * pref + 0.4 * adjusted_qual - 0.3 * time_ratio
+    raise ValueError(f"알 수 없는 코스 모드: {mode}")
 
     raise ValueError(f"알 수 없는 코스 모드: {mode}")
 
 
 def score_candidate(
-    candidate: dict,       # filters.filter_candidates()가 반환한 {"place":, "travel_min":, "stay_min":} 딕셔너리
-    mode: str,
-    purpose_main: str,
-    purpose_sub: str | None,
-    remain_time_min: float,
-    nlp_match_score: float | None = None,
+    candidate,      # filters.filter_candidates()가 반환한 {"place":, "travel_min":, "stay_min":} 딕셔너리
+    mode,
+    purpose_main,
+    purpose_sub,
+    remain_time_min,
+    nlp_match_score=None,
 ) -> dict:
     """
     filters.py 출력 하나를 받아서 Micro 점수까지 계산해 붙여주는 통합 함수.
@@ -152,13 +140,9 @@ def score_candidate(
     travel_min = candidate["travel_min"]
     stay_min = candidate["stay_min"]
 
-    tag_score = getattr(place, "placetagscore", None)   # OneToOne 역참조, 없으면 None
-    stay_stat = getattr(place, "stay_stat", None)
-
     pref = calc_pref(tag_score, purpose_main, purpose_sub, nlp_match_score)
     adjusted_qual = get_adjusted_qual(stay_stat)
     cost_move = calc_cost_move(travel_min)
-
     micro_score = calc_micro_score(
         mode, pref, adjusted_qual, cost_move, travel_min, stay_min, remain_time_min
     )
