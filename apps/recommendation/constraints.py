@@ -238,14 +238,13 @@ if __name__ == "__main__":
     # 기대값: 45, 45 (40→45반올림, 50→45반올림... 실제론 round(50/15)*15=45)
 
 
-    # 권역(4분면) 분류
-    # 한라산 정상 좌표를 기준점으로 위/경도만 비교하는 방식
+# 권역(4분면) 분류
+# 한라산 정상 좌표를 기준점으로 위/경도만 비교하는 방식
     
-    HALLASAN_LAT = 33.3617   # 한라산 정상 기준점
-    HALLASAN_LNG = 126.5292
+HALLASAN_LAT = 33.3617   # 한라산 정상 기준점
+HALLASAN_LNG = 126.5292
 
-
-    def classify_quadrant(latitude: float, longitude: float) -> str:
+def classify_quadrant(latitude: float, longitude: float) -> str:
         """
         위경도를 한라산 정상 기준으로 비교해서 4분면 중 하나를 반환.
         Returns: "NE"(북동) | "NW"(북서) | "SE"(남동) | "SW"(남서)
@@ -264,9 +263,17 @@ if __name__ == "__main__":
         return "SW"
 
 
-    # ── 최소 동작 확인 ──────────────────────────────────────────
-    if __name__ == "__main__":
-        # 성산일출봉(동쪽, 남쪽) → SE 기대
-        print(classify_quadrant(33.4587, 126.9425))
-        # 한림공원(서쪽, 북쪽) → NW 기대
-        print(classify_quadrant(33.4966, 126.2419))
+# ── 최소 동작 확인 ──────────────────────────────────────────
+if __name__ == "__main__":
+    # Case A 예시
+    result = calc_avail_hours(
+        day_index=1,
+        total_days=4,
+        trip_start_dt=datetime(2026, 9, 1, 14, 0),
+        trip_end_dt=datetime(2026, 9, 4, 17, 0),
+    )
+    print("Case A (14:00 입도):", result)
+
+    # 4분면 테스트
+    print(classify_quadrant(33.4587, 126.9425))  # SE
+    print(classify_quadrant(33.4966, 126.2419))  # NW

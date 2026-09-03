@@ -14,15 +14,15 @@ class Place(models.Model):
     content_type_name = models.CharField(max_length=20, db_index=True) #관광지 / 문화시설 / 쇼핑 / 음식점
     title = models.CharField(max_length=200)
     address = models.CharField(max_length=300)
-    zipcode = models.CharField(max_length=10, blank=True)
+    zipcode = models.CharField(max_length=50, blank=True)
     longitude = models.FloatField()
     latitude = models.FloatField()
-    overview = models.TextField( blank=True) # 장소 소개글. LLM 목적태깅(DescriptionFit)과 자유입력 임베딩 매칭에 씀
+    overview = models.TextField(blank=True) # 장소 소개글. LLM 목적태깅(DescriptionFit)과 자유입력 임베딩 매칭에 씀
     homepage = models.URLField(blank=True)
-    contact = models.CharField(max_length=100, blank=True)
+    contact = models.CharField(max_length=500, blank=True)
 
     # 운영시간, 휴무일 (원본 텍스트 + 파싱 결과 분리 저장)
-    hours_raw = models.CharField(max_length=100, blank=True) # 원문 그대로(예: '11:20~30 (마지막 주문 19:50)). 파싱 실패 시 대조용 남겨둠
+    hours_raw = models.CharField(max_length=1000, blank=True) # 원문 그대로(예: '11:20~30 (마지막 주문 19:50)). 파싱 실패 시 대조용 남겨둠
     closed_days_raw = models.CharField(max_length=200, blank=True)
 
     HOURS_STATUS_CHOICES = [
@@ -30,7 +30,7 @@ class Place(models.Model):
     ]
 
     hours_status = models.CharField(
-        max_length=10, choices=HOURS_STATUS_CHOICES, default="uncertain"
+        max_length=100, choices=HOURS_STATUS_CHOICES, default="uncertain"
     ) # build_hours_cache.py 결과. always/windows면 open_windows 참고
     open_windows = models.JSONField(
         default=dict, blank=True
@@ -40,9 +40,9 @@ class Place(models.Model):
 
     #관광지/문화시설 공통
     fees = models.CharField(max_length=500, blank=True)
-    parking = models.CharField(max_length=20, blank=True)
+    parking = models.CharField(max_length=100, blank=True)
     restroom = models.CharField(max_length=50, blank=True)
-    credit_card = models.CharField(max_length=20, blank=True)
+    credit_card = models.CharField(max_length=100, blank=True)
     detail_information = models.TextField(blank=True)
 
     # --- 쇼핑 전용 ---
@@ -51,9 +51,9 @@ class Place(models.Model):
 
     # --- 음식점 전용 ---
     featured_menu = models.CharField(max_length=300, blank=True)
-    menu = models.TextField(blank=True)
+    menu = models.TextField(max_length=100, blank=True)
     food_role = models.CharField(
-        max_length=20, blank=True, db_index=True,
+        max_length=50, blank=True, db_index=True,
         help_text="RESTAURANT/CAFE/SNACK/BAR — small_category_name 기반 import 시 계산"
     )
     food_tags = models.JSONField(
@@ -66,12 +66,12 @@ class Place(models.Model):
     region_code = models.CharField(max_length=10)
     signgu_code = models.CharField(max_length=10, help_text="희망권역 필터에 사용")
     large_category_code = models.CharField(max_length=10)
-    large_category_name = models.CharField(max_length=50)
+    large_category_name = models.CharField(max_length=100)
     middle_category_code = models.CharField(max_length=10)
-    middle_category_name = models.CharField(max_length=50)
+    middle_category_name = models.CharField(max_length=100)
     small_category_code = models.CharField(max_length=10)
     small_category_name = models.CharField(
-        max_length=50,
+        max_length=100,
         help_text="카테고리 중앙값 상속(1순위)의 기준 키. 음식점 food_role 매핑에도 사용"
     )
 
@@ -106,7 +106,7 @@ class Place(models.Model):
         blank=True,
         help_text="밴드 상한"
     )
-    stay_src = models.CharField(max_length=20, blank=True)
+    stay_src = models.CharField(max_length=100, blank=True)
 
     qual = models.FloatField(null=True, blank=True)
     qual_rel = models.FloatField(null=True, blank=True)
@@ -143,20 +143,20 @@ class Lodging(models.Model):
     longitude = models.FloatField()
     latitude = models.FloatField()
     overview = models.TextField(blank=True)
-    contact = models.CharField(max_length=100, blank=True)
+    contact = models.CharField(max_length=500, blank=True)
 
     # 호텔/리조트·콘도/펜션·민박/게스트하우스 — 숙박 유형 필터
-    small_category_name = models.CharField(max_length=50, blank=True)
+    small_category_name = models.CharField(max_length=500, blank=True)
     signgu_code = models.CharField(max_length=10, blank=True)
     quadrant = models.CharField(max_length=2, blank=True, default="SW")
 
-    check_in_time = models.CharField(max_length=20, blank=True)
+    check_in_time = models.CharField(max_length=100, blank=True)
     check_out_time = models.CharField(max_length=20, blank=True)
     capacity = models.CharField(max_length=50, blank=True,)
-    room_count = models.CharField(max_length=20, blank=True)
-    room_type = models.CharField(max_length=200, blank=True)
-    room_capacity_summary = models.CharField(max_length=200, blank=True)
-    room_options = models.CharField(max_length=300, blank=True)
+    room_count = models.CharField(max_length=100, blank=True)
+    room_type = models.CharField(max_length=500, blank=True)
+    room_capacity_summary = models.TextField(blank=True)
+    room_options = models.TextField(blank=True)
     rooms_json = models.JSONField(default=list, blank=True) # 객실별 상세정보 원본(가격/시설 등)
 
     parking = models.CharField(max_length=20, blank=True)
@@ -171,7 +171,7 @@ class Lodging(models.Model):
 
     pet_allowed_type = models.CharField(max_length=100, blank=True)
     pet_allowed_animals = models.CharField(max_length=100, blank=True)
-    pet_requirements = models.CharField(max_length=300, blank=True)
+    pet_requirements = models.CharField(max_length=500, blank=True)
     pet_extra_info = models.TextField(blank=True)
 
     # !!!!!!확인 필요!!!!!!!!!!

@@ -5,9 +5,9 @@ Place 테이블: 관광지, 문화시설, 쇼핑, 음식점
 Lodging 테이블: 숙박
 
 사용법:
-    python manage.py import_tour_api --type 관광지문화쇼핑 경로/제주_관광지_문화시설_쇼핑_체류시간.csv
-    python manage.py import_tour_api --type 음식점 경로/제주_음식점_체류시간.csv
-    python manage.py import_tour_api --type 숙박 경로/숙박_tripcom_matched.csv
+    python manage.py import_tour_api data/jeju_places_stay_time.csv --type 관광지문화쇼핑
+    python manage.py import_tour_api data/jeju_restaurants_stay_time.csv --type 음식점
+    python manage.py import_tour_api data/lodgings_tripcom_matched.csv --type 숙박
 """
 import csv
 from django.core.management.base import BaseCommand, CommandError
@@ -72,72 +72,78 @@ class Command(BaseCommand):
 
         food_role = FOOD_ROLE_MAP.get(small_cat, "") if is_food else ""
 
-        Place.objects.update_or_create(
-            content_id=content_id,
-            defaults=dict(
-                content_type_id=row.get("content_type_id", ""),
-                content_type_name=row.get("content_type_name", ""),
-                title=row.get("title", ""),
-                address=row.get("address", ""),
-                zipcode=row.get("zipcode", ""),
-                longitude=lng,
-                latitude=lat,
-                overview=row.get("overview", ""),
-                homepage=self._clean(row.get("homepage", "")),
-                contact=row.get("contact", ""),
+        # ── 디버깅을 위해 try-except 구문 추가 ────────────────────
+        try:
+            Place.objects.update_or_create(
+                content_id=content_id,
+                defaults=dict(
+                    content_type_id=row.get("content_type_id", ""),
+                    content_type_name=row.get("content_type_name", ""),
+                    title=row.get("title", ""),
+                    address=row.get("address", ""),
+                    zipcode=row.get("zipcode", ""),
+                    longitude=lng,
+                    latitude=lat,
+                    overview=row.get("overview", ""),
+                    homepage=self._clean(row.get("homepage", "")),
+                    contact=row.get("contact", ""),
 
-                hours_raw=row.get("hours", ""),
-                closed_days_raw=row.get("closed_days", ""),
-                hours_status="uncertain",   # 팀 캐시 도착 전 임시값
-                open_windows={},
-                closed_weekdays=[],
-                hours_uncertain=True,
+                    hours_raw=row.get("hours", ""),
+                    closed_days_raw=row.get("closed_days", ""),
+                    hours_status="uncertain",
+                    open_windows={},
+                    closed_weekdays=[],
+                    hours_uncertain=True,
 
-                fees=row.get("fees", ""),
-                parking=row.get("parking", ""),
-                restroom=row.get("restroom", ""),
-                credit_card=row.get("credit_card", ""),
-                detail_information=row.get("detail_information", ""),
+                    fees=row.get("fees", ""),
+                    parking=row.get("parking", ""),
+                    restroom=row.get("restroom", ""),
+                    credit_card=row.get("credit_card", ""),
+                    detail_information=row.get("detail_information", ""),
 
-                market_days=row.get("market_days", ""),
-                sale_items=row.get("sale_items", ""),
+                    market_days=row.get("market_days", ""),
+                    sale_items=row.get("sale_items", ""),
 
-                featured_menu=row.get("featured_menu", ""),
-                menu=row.get("menu", ""),
-                food_role=food_role,
-                food_tags=food_tags,
+                    featured_menu=row.get("featured_menu", ""),
+                    menu=row.get("menu", ""),
+                    food_role=food_role,
+                    food_tags=food_tags,
 
-                region_code=row.get("region_code", ""),
-                signgu_code=row.get("signgu_code", ""),
-                large_category_code=row.get("large_category_code", ""),
-                large_category_name=row.get("large_category_name", ""),
-                middle_category_code=row.get("middle_category_code", ""),
-                middle_category_name=row.get("middle_category_name", ""),
-                small_category_code=row.get("small_category_code", ""),
-                small_category_name=small_cat,
+                    region_code=row.get("region_code", ""),
+                    signgu_code=row.get("signgu_code", ""),
+                    large_category_code=row.get("large_category_code", ""),
+                    large_category_name=row.get("large_category_name", ""),
+                    middle_category_code=row.get("middle_category_code", ""),
+                    middle_category_name=row.get("middle_category_name", ""),
+                    small_category_code=row.get("small_category_code", ""),
+                    small_category_name=small_cat,
 
-                quadrant=classify_quadrant(lat, lng),
+                    quadrant=classify_quadrant(lat, lng),
 
-                # LLM 목적 태그 (CSV의 Score_* 컬럼, 대문자 그대로임에 주의)
-                score_nature=int(row.get("Score_Nature", 0) or 0),
-                score_food=int(row.get("Score_Food", 0) or 0),
-                score_photo=int(row.get("Score_Photo", 0) or 0),
-                score_culture=int(row.get("Score_Culture", 0) or 0),
-                score_activity=int(row.get("Score_Activity", 0) or 0),
-                score_shopping=int(row.get("Score_Shopping", 0) or 0),
+                    score_nature=int(row.get("Score_Nature", 0) or 0),
+                    score_food=int(row.get("Score_Food", 0) or 0),
+                    score_photo=int(row.get("Score_Photo", 0) or 0),
+                    score_culture=int(row.get("Score_Culture", 0) or 0),
+                    score_activity=int(row.get("Score_Activity", 0) or 0),
+                    score_shopping=int(row.get("Score_Shopping", 0) or 0),
 
-                # 체류시간·품질 (컬럼명이 CSV마다 stay_time_minutes로 통일돼있음)
-                stay_time_minutes=int(row["stay_time_minutes"]),
-                stay_min=int(row["stay_min"]),
-                stay_max=int(row["stay_max"]),
-                stay_src=row.get("stay_src", ""),
-                qual=self._to_float_or_none(row.get("qual", "")),
-                qual_rel=self._to_float_or_none(row.get("qual_rel", "")),
-                qual_category=self._to_float_or_none(row.get("qual_category", "")),
-                satisfaction_score=self._to_float_or_none(row.get("satisfaction_score", "")),
-                satisfaction_src=row.get("satisfaction_src", ""),
-            ),
-        )
+                    stay_time_minutes=int(row["stay_time_minutes"]),
+                    stay_min=int(row["stay_min"]),
+                    stay_max=int(row["stay_max"]),
+                    stay_src=row.get("stay_src", ""),
+                    qual=self._to_float_or_none(row.get("qual", "")),
+                    qual_rel=self._to_float_or_none(row.get("qual_rel", "")),
+                    qual_category=self._to_float_or_none(row.get("qual_category", "")),
+                    satisfaction_score=self._to_float_or_none(row.get("satisfaction_score", "")),
+                    satisfaction_src=row.get("satisfaction_src", ""),
+                ),
+            )
+        except Exception as e:
+            print(f"\n❌ 에러 발생 (content_id: {content_id})")
+            for key, val in row.items():
+                if isinstance(val, str) and len(val) > 20:
+                    print(f"  - 20자 초과 컬럼 [{key}]: ({len(val)}자) '{val}'")
+            raise e
 
     def _import_lodging_row(self, row: dict):
         import json
@@ -152,47 +158,53 @@ class Command(BaseCommand):
                 rooms_json = json.loads(raw_rooms)
             except (json.JSONDecodeError, TypeError):
                 rooms_json = []  # 파싱 실패해도 적재는 계속 진행
+        try:
+            Lodging.objects.update_or_create(
+                content_id=content_id,
+                defaults=dict(
+                    title=row.get("title", ""),
+                    address=row.get("address", ""),
+                    longitude=lng,
+                    latitude=lat,
+                    overview=row.get("overview", ""),
+                    contact=row.get("contact", ""),
+                    small_category_name=row.get("small_category_name", ""),
+                    signgu_code=row.get("signgu_code", ""),
+                    quadrant=classify_quadrant(lat, lng),
 
-        Lodging.objects.update_or_create(
-            content_id=content_id,
-            defaults=dict(
-                title=row.get("title", ""),
-                address=row.get("address", ""),
-                longitude=lng,
-                latitude=lat,
-                overview=row.get("overview", ""),
-                contact=row.get("contact", ""),
-                small_category_name=row.get("small_category_name", ""),
-                signgu_code=row.get("signgu_code", ""),
-                quadrant=classify_quadrant(lat, lng),
+                    check_in_time=row.get("check_in_time", ""),
+                    check_out_time=row.get("check_out_time", ""),
+                    capacity=self._clean(row.get("capacity", "")),
+                    room_count=self._clean(row.get("room_count", "")),
+                    room_type=self._clean(row.get("room_type", "")),
+                    room_capacity_summary=self._clean(row.get("room_capacity_summary", "")),
+                    room_options=self._clean(row.get("room_options", "")),
+                    rooms_json=rooms_json,
 
-                check_in_time=row.get("check_in_time", ""),
-                check_out_time=row.get("check_out_time", ""),
-                capacity=self._clean(row.get("capacity", "")),
-                room_count=self._clean(row.get("room_count", "")),
-                room_type=self._clean(row.get("room_type", "")),
-                room_capacity_summary=self._clean(row.get("room_capacity_summary", "")),
-                room_options=self._clean(row.get("room_options", "")),
-                rooms_json=rooms_json,
+                    parking=row.get("parking", ""),
+                    cooking=self._clean(row.get("cooking", "")),
+                    facilities=self._clean(row.get("facilities", "")),
+                    pickup=self._clean(row.get("pickup", "")),
+                    food_place=self._clean(row.get("food_place", "")),
+                    refund_policy=self._clean(row.get("refund_policy", "")),
+                    min_room_price=self._clean(row.get("min_room_price", "")),
+                    reservation_info=self._clean(row.get("reservation_info", "")),
+                    reservation_url=self._clean(row.get("reservation_url", "")),
 
-                parking=row.get("parking", ""),
-                cooking=self._clean(row.get("cooking", "")),
-                facilities=self._clean(row.get("facilities", "")),
-                pickup=self._clean(row.get("pickup", "")),
-                food_place=self._clean(row.get("food_place", "")),
-                refund_policy=self._clean(row.get("refund_policy", "")),
-                min_room_price=self._clean(row.get("min_room_price", "")),
-                reservation_info=self._clean(row.get("reservation_info", "")),
-                reservation_url=self._clean(row.get("reservation_url", "")),
+                    pet_allowed_type=self._clean(row.get("pet_allowed_type", "")),
+                    pet_allowed_animals=self._clean(row.get("pet_allowed_animals", "")),
+                    pet_requirements=self._clean(row.get("pet_requirements", "")),
+                    pet_extra_info=self._clean(row.get("pet_extra_info", "")),
 
-                pet_allowed_type=self._clean(row.get("pet_allowed_type", "")),
-                pet_allowed_animals=self._clean(row.get("pet_allowed_animals", "")),
-                pet_requirements=self._clean(row.get("pet_requirements", "")),
-                pet_extra_info=self._clean(row.get("pet_extra_info", "")),
-
-                tripcom_hotel_id="",  # 현재 CSV에 컬럼 없음 — 팀 확인 필요
-            ),
-        )
+                    tripcom_hotel_id="",  # 현재 CSV에 컬럼 없음 — 팀 확인 필요
+                ),
+            )
+        except Exception as e:
+            print(f"\n❌ 에러 발생 (content_id: {content_id})")
+            for key, val in row.items():
+                if isinstance(val, str) and len(val) > 20:
+                    print(f"  - 20자 초과 컬럼 [{key}]: ({len(val)}자) '{val}'")
+            raise e
 
     @staticmethod
     def _clean(value: str) -> str:
