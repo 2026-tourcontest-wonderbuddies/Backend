@@ -6,11 +6,13 @@
    분식·간편식 선호가 실제로 반영 안 되는 버그가 있었음.
 3. 소프트 필터(완화) 로직 신규: 후보 5곳 미만 시 태그조건 1개 제거 + 0.15 감점으로
    "진짜 일치하는 곳이 남아있으면 항상 먼저 선택"되도록 우선순위 보장.
+4. Micro 점수 기반 음식점 후보 정렬/채점 함수(score_food_candidates) 추가.
 
 : 음식점/카페 전용 필터링 + 점수 로직
 """
-
+from __future__ import annotations
 from apps.places.models import Place
+from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score
 
 MEAL_CAPABLE_ROLES = ("RESTAURANT", "SNACK")   # ★ 변경: 기존 RESTAURANT만 → SNACK 추가
 SOFT_FILTER_MIN_MEAL_CANDIDATES = 5
@@ -80,11 +82,6 @@ def filter_food_candidates(
 ) -> tuple[list[Place], list[str]]:
     """
     §1.1 필수필터 + §1.2 식사제한 + food_tags 매칭.
-
-    Returns:
-        (통과한 후보 리스트, 완화 미적용 시 매칭됐을 place_id 집합 — 소프트필터 판단용 아님,
-         단순히 태그조건 적용 전/후 구분을 위해 이 함수는 '엄격 매칭'만 수행.
-         완화는 상위 레벨(course_builder 또는 아래 build_meal_candidates)에서 처리)
     """
     strict_prefs = [p for p in (food_pref_1, food_pref_2) if p]
     survivors = []
@@ -114,13 +111,12 @@ def build_meal_candidates(
     is_open_at_fn,
 ) -> tuple[list[Place], set[str]]:
     """
-    ★ 신규 — 소프트 필터 진입점.
+    ★ 소프트 필터 진입점.
     엄격 매칭 결과가 SOFT_FILTER_MIN_MEAL_CANDIDATES 미만이면, 선호태그 조건만
     제거하고(식사제한·권역은 유지) 재계산해서 후보를 보충한다.
 
     Returns:
         (최종 후보 리스트, 완화로 추가된 place_id 집합)
-        완화된 place_id는 scoring 단계에서 RELAX_PENALTY(0.15)를 감점하는 데 쓴다.
     """
     strict_candidates, strict_prefs = filter_food_candidates(
         all_food_places, quadrant, visit_datetime, food_pref_1, food_pref_2,
@@ -148,8 +144,7 @@ def build_meal_candidates(
 
 def apply_relax_penalty(micro_score: float, place_id: str, relaxed_ids: set[str]) -> float:
     """
-    ★ 신규 — score_candidate() 이후에 이 함수를 한 번 더 거쳐서 감점 적용.
-    완화된 후보는 항상 "진짜 일치하는 곳"보다 낮은 우선순위를 갖도록 보장.
+    완화된 후보는 항상 "진짜 일치하는 곳"보다 낮은 우선순위를 갖도록 감점 적용 (0.15).
     """
     if place_id in relaxed_ids:
         return micro_score - RELAX_PENALTY
@@ -162,9 +157,66 @@ def calc_purpose_fit(main_score: float, sub_score: float) -> float:
     return min(base + synergy, 100)
 
 
-def calc_pref_food(purpose_fit: float, query_fit: float | None) -> float:
+def calc_pref_food(purpose_fit: float, query_fit: float | None = None) -> float:
     pref_food = purpose_fit if query_fit is None else (purpose_fit * 0.5 + query_fit * 0.5)
     return pref_food / 100.0
+
+
+def score_food_candidates(
+    candidates: list[Place],        # build_meal_candidates로 필터링된 음식점 후보 리스트
+    current_place,                   # 직전 장소 (이동시간 계산 기준점)
+    purpose_main: str,
+    purpose_sub: str,
+    mode: str,                       # "dist" / "pref" / "relax"
+    remain_time_min: float,
+    get_travel_time_fn,
+    relaxed_ids: set[str] = None,    # ★ 추가: 완화 필터 적용된 place_id 집합 (소프트 필터 감점용)
+) -> list[dict]:
+    """
+    각 음식점 후보에 Micro 점수를 매겨서 높은 순으로 정렬해 반환한다.
+    engine.py에서 이 함수의 결과 리스트 맨 앞([0])을 고르면 된다.
+
+    Returns: [{"place":, "travel_min":, "micro_score":, ...}, ...] 점수 내림차순 정렬됨
+    """
+    if relaxed_ids is None:
+        relaxed_ids = set()
+
+    scored = []
+    for place in candidates:
+        travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
+        travel_min = travel_result["duration_min_adjusted"]
+        stay_min = place.stay_time_minutes
+
+        # 1. 여행 목적(purpose_main/sub) 매칭 점수 계산
+        match_main = get_purpose_match(place, purpose_main)
+        match_sub = get_purpose_match(place, purpose_sub) if purpose_sub else 0.0
+        
+        # 2. 원본의 시너지 반영 공식(calc_purpose_fit & calc_pref_food) 재사용
+        purpose_fit = calc_purpose_fit(match_main, match_sub)
+        pref = calc_pref_food(purpose_fit)
+
+        # 3. 품질 및 이동 비용 계산
+        adjusted_qual = get_adjusted_qual(place)
+        cost_move = calc_cost_move(travel_min)
+
+        # 4. Micro 점수 산출
+        micro_score = calc_micro_score(mode, pref, adjusted_qual, cost_move, travel_min, stay_min, remain_time_min)
+
+        # 5. ★ 소프트 필터 감점(RELAX_PENALTY) 적용
+        final_micro_score = apply_relax_penalty(micro_score, place.content_id, relaxed_ids)
+
+        scored.append({
+            "place": place,
+            "travel_min": travel_min,
+            "stay_min": stay_min,
+            "pref": pref,
+            "adjusted_qual": adjusted_qual,
+            "micro_score": final_micro_score,
+        })
+
+    # Micro 점수 내림차순 정렬
+    scored.sort(key=lambda x: x["micro_score"], reverse=True)
+    return scored
 
 
 def decide_food_slot_types(purpose_selected, need_lunch, need_dinner, avail_hours, cafe_balance):

@@ -12,7 +12,7 @@ Pipeline 3 — 타임라인 분석 및 슬롯 할당.
 Baseline은 일차별 표가 아니라 단일 상수 7.0 (팀원 08.14 검증 결과 채택안).
 격자는 15분 (팀원 08.15 결정 — 30분이 아니라 15분으로 최종 확정됨, 주의!).
 """
-
+from __future__ import annotations
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 

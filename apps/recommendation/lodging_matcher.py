@@ -2,7 +2,7 @@
 숙박 로직
 : 코스가 완성된 후, 각 ItineraryDay에 숙소를 매칭해서 붙이고, Trip.com 예약 링크를 붙이는 로직 
 """
-
+from __future__ import annotations
 import math
 from apps.places.models import Lodging
 from apps.trips.models import ItineraryDay

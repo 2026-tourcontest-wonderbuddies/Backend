@@ -3,6 +3,7 @@
 : 물리적으로 갈 수 없는 곳 필터링(영업시간, 권역, 이동수단 제약, 시간예산)
 """
 
+from __future__ import annotations
 from datetime import datetime, timedelta
 
 

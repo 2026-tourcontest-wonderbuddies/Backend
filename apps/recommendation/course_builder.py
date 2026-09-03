@@ -14,7 +14,7 @@ Pipeline 5.4~5.6 — 휴리스틱 빔서치 + Macro 평가로 하루치 코스�
 이동시간 컷(60분 초과), 시간예산 체크는 filters.py가 담당하고,
 이 모듈은 "여러 후보를 조합해서 코스 형태로 완성하는" 조립 로직에 집중한다.
 """
-
+from __future__ import annotations
 from copy import deepcopy
 from apps.recommendation.filters import filter_candidates
 from apps.recommendation.scoring import score_candidate

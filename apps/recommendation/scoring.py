@@ -11,6 +11,7 @@ Pipeline 5.2~5.3 — Micro 평가 (단일 장소 스코어링).
 동적 가중치 스와핑(4:6 전환)은 시간 여유 있을 때 넣는 stretch 기능이라
 스위치로 켜고 끌 수 있게 만들어둔다 (기본 off).
 """
+from __future__ import annotations
 
 MAIN_PURPOSE_THRESHOLD = 0.40
 SYNERGY_BONUS_WEIGHT = 0.20
