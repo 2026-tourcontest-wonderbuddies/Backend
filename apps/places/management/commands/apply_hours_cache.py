@@ -15,7 +15,7 @@ apply_hours_cache.py — hours_cache.json을 Place에 반영.
     {"<content_id>": {"status": "windows", "open": "09:00", "close": "18:00", ...}}
 
 사용법:
-    python manage.py apply_hours_cache 경로/hours_cache.json
+    python manage.py apply_hours_cache data/hours_cache.json
 """
 
 import json
