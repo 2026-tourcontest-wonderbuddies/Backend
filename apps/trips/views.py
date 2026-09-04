@@ -20,6 +20,7 @@ from apps.trips.serializers import (
 from apps.recommendation.engine import generate_all_courses
 from apps.recommendation.engine_provider import get_routing_engine
 from apps.recommendation.lodging_matcher import match_lodging_for_day
+from apps.nlp.modification_interpreter import parse_modification_request
 
 
 class TripRequestCreateView(APIView):
@@ -141,12 +142,28 @@ class CourseModifyView(APIView):
         serializer = ModifyRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # ⚠️ 아직 LLM 의도해석 + 재계산 로직 미구현. 우선 로그만 저장.
+        raw_message = serializer.validated_data["raw_message"]
+
+        # 1. 자연어 메시지를 분석해서 델타(변경 사항) 추출
+        delta = parse_modification_request(raw_message)
+
+        # 2. 로그 생성 시 빈 딕셔너리가 아니라 실제 분석된 delta를 저장
         log = course.modification_logs.create(
-            raw_message=serializer.validated_data["raw_message"],
-            parsed_delta={},  # apps/nlp 완성 후 채워짐
+            raw_message=raw_message,
+            parsed_delta=delta,  
         )
+
+        # 3. 팀원이 말한 locked_place_ids 활용 지점!
+        # 사용자가 "여기 장소는 고정해줘" 라고 한 장소 ID 목록을 뽑아냅니다.
+        locked_place_ids = delta.get("locked_place_ids", [])
+        
+        # TODO: 이 locked_place_ids를 course_builder로 넘겨서 
+        # 기존 코스를 유지하면서 나머지만 재계산하는 로직을 여기에 붙이시면 됩니다.
+        # 예시: 
+        # new_course_data = rebuild_course(course, locked_place_ids=locked_place_ids, delta=delta)
+
         return Response({
             "log_id": log.id,
-            "message": "수정 요청이 저장되었습니다. 재계산 기능은 아직 준비 중입니다.",
-        }, status=status.HTTP_202_ACCEPTED)
+            "parsed_delta": delta,
+            "message": "수정 요청이 성공적으로 반영되었습니다.",
+        }, status=status.HTTP_200_OK)

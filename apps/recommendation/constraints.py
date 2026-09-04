@@ -57,6 +57,26 @@ class DayAvailability:
     need_night_spot: bool
     target_slots: int
 
+MORNING_WINDOW = (7 * 60, 9 * 60)  # ★ 신규: 07:00~09:00
+
+
+def check_meal_flags(start_min: int, end_min: int) -> tuple[bool, bool, bool]:
+    """★ 변경: 반환값이 2개→3개 (morning 추가)."""
+    need_morning = not (end_min <= MORNING_WINDOW[0] or start_min >= MORNING_WINDOW[1])
+    need_lunch = not (end_min <= LUNCH_WINDOW[0] or start_min >= LUNCH_WINDOW[1])
+    need_dinner = not (end_min <= DINNER_WINDOW[0] or start_min >= DINNER_WINDOW[1])
+    return need_morning, need_lunch, need_dinner
+
+
+def check_checkin_flag(day_index: int, day_last_arrival_min: int) -> bool:
+    """
+    ★ 신규 — accommodations 계약의 CHECKIN_CUTOFF(18:00) 규칙 그대로 반영.
+    1일차(day_index==1)에만 의미 있음 (앵커 분할 비활성이라 숙소 바뀌는 날이 없음).
+    """
+    if day_index != 1:
+        return False
+    return day_last_arrival_min < 18 * 60
+
 
 def _minutes_of_day(dt: datetime) -> int:
     """datetime에서 '그날 0시부터 몇 분 지났는지'만 뽑아낸다."""
@@ -100,24 +120,21 @@ def calc_avail_hours(
     day_case = calc_day_case(day_index, total_days)
 
     if day_case == "D":
-        # [Case D] 당일치기: 시작·종료 둘 다 임의 시각
-        start_min = max(_minutes_of_day(trip_start_dt) + arrival_buffer_min, DAY_START_ANCHOR)
-        end_min = min(_minutes_of_day(trip_end_dt) - airport_buffer_min, DAY_END_ANCHOR)
+        start_min = max(_minutes_of_day(trip_start_dt), DAY_START_ANCHOR)
+        end_min = min(_minutes_of_day(trip_end_dt), DAY_END_ANCHOR)
         avail_min = max(0, end_min - start_min)
 
     elif day_case == "A":
-        # [Case A] 입도일: 시작만 임의 시각(도착시간+버퍼), 종료는 21:00 고정
-        start_min = max(_minutes_of_day(trip_start_dt) + arrival_buffer_min, DAY_START_ANCHOR)
+        start_min = max(_minutes_of_day(trip_start_dt), DAY_START_ANCHOR)  # ★ 버퍼 삭제
         end_min = DAY_END_ANCHOR
         avail_min = max(0, end_min - start_min)
 
     elif day_case == "C":
-        # [Case C] 출도일: 시작은 09:00 고정, 종료만 임의 시각(출발시간-버퍼)
         start_min = DAY_START_ANCHOR
-        end_min = min(_minutes_of_day(trip_end_dt) - airport_buffer_min, DAY_END_ANCHOR)
+        end_min = min(_minutes_of_day(trip_end_dt), DAY_END_ANCHOR)  # ★ 버퍼 삭제
         avail_min = max(0, end_min - start_min)
 
-    else:  # "B" 중간일차 — 온전한 12시간, 임의성 없음
+    else:  # "B"
         start_min = DAY_START_ANCHOR
         end_min = DAY_END_ANCHOR
         avail_min = end_min - start_min
@@ -125,7 +142,7 @@ def calc_avail_hours(
     avail_hours = avail_min / 60
 
     # 예외 플래그 판정 (3.2절)
-    need_lunch, need_dinner = check_meal_flags(start_min, end_min)
+    need_morning, need_lunch, need_dinner = check_meal_flags(start_min, end_min)
     need_night = check_night_spot_flag(end_min)
 
     # 야간 입도 케이스: 가용시간이 1시간 이하면 관광지 스케줄링 자체를 중단해야 하므로
@@ -145,6 +162,7 @@ def calc_avail_hours(
         avail_hours=round(avail_hours, 2),
         avail_start_min=start_min,
         avail_end_min=end_min,
+        need_morning=need_morning and not is_late_arrival,
         need_lunch=need_lunch and not is_late_arrival,
         need_dinner=need_dinner or is_late_arrival,  # 야간 입도는 저녁(야식)만 배치
         need_night_spot=need_night,
@@ -152,11 +170,12 @@ def calc_avail_hours(
     )
 
 
-def check_meal_flags(start_min: int, end_min: int) -> tuple[bool, bool]:
+def check_meal_flags(start_min: int, end_min: int) -> tuple[bool, bool, bool]:
     """가용시간 구간에 점심/저녁 시간대가 포함되는지 판정 (3.2-1)."""
+    need_morning = not (end_min <= MORNING_WINDOW[0] or start_min >= MORNING_WINDOW[1])
     need_lunch = not (end_min <= LUNCH_WINDOW[0] or start_min >= LUNCH_WINDOW[1])
     need_dinner = not (end_min <= DINNER_WINDOW[0] or start_min >= DINNER_WINDOW[1])
-    return need_lunch, need_dinner
+    return need_morning, need_lunch, need_dinner
 
 
 def check_night_spot_flag(end_min: int) -> bool:
@@ -261,6 +280,27 @@ def classify_quadrant(latitude: float, longitude: float) -> str:
         if not is_north and is_east:
             return "SE"
         return "SW"
+
+JEJU_AIRPORT_LAT = 33.5104
+JEJU_AIRPORT_LNG = 126.4914
+
+
+def estimate_airport_travel_min(place_lat: float, place_lng: float, transport_mode: str) -> float:
+    """
+    공항↔장소 구간 전용 근사 계산. OSRM 매트릭스에 공항이 없어 정식 조회 불가하므로
+    직선거리(하버사인) × 도로보정계수 ÷ 평균속도로 근사.
+    ⚠️ 임시 방편 — 팀에 "다음 OSRM 매트릭스 재빌드 시 공항 노드 추가 가능한지" 확인 권장.
+    """
+    import math
+    R = 6371
+    dlat = math.radians(place_lat - JEJU_AIRPORT_LAT)
+    dlng = math.radians(place_lng - JEJU_AIRPORT_LNG)
+    a = (math.sin(dlat/2)**2 +
+         math.cos(math.radians(JEJU_AIRPORT_LAT)) * math.cos(math.radians(place_lat)) * math.sin(dlng/2)**2)
+    distance_km = R * 2 * math.asin(math.sqrt(a)) * 1.3  # 도로 보정계수
+
+    avg_speed_kmh = 40 if transport_mode in ("rental_car", "own_car") else 35
+    return (distance_km / avg_speed_kmh) * 60
 
 
 # ── 최소 동작 확인 ──────────────────────────────────────────

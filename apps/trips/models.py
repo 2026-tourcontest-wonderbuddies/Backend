@@ -18,57 +18,49 @@ from apps.places.models import Place, Lodging
 
 
 class TripRequest(models.Model):
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="trips",
-        null=True, blank=True,  # 로그인 붙기 전까지는 null 허용, 나중에 필수로 전환
-    )
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+                              related_name="trips", null=True, blank=True)
 
-    start_datetime = models.DateTimeField()
-    end_datetime = models.DateTimeField()
+    start_datetime = models.DateTimeField(help_text="입국수속 마친 후 실제 활동 시작 시각 (제주공항 기준)")
+    end_datetime = models.DateTimeField(help_text="복귀편 출발 위해 공항 도착 필요한 시각")
 
-    # ★ 변경: 출발지는 반드시 Place 테이블에 있는 content_id를 참조해야
-    # 이동시간 매트릭스 조회가 가능함 (공항 등도 TourAPI POI로 등록돼 있어야 함)
-    departure_place_id = models.CharField(max_length=20, blank=True)
-    return_to_departure = models.BooleanField(default=False)
+    # ★ 삭제: departure_place_id, return_to_departure — 공항 암묵 고정이라 불필요
 
     TRANSPORT_CHOICES = [("rental_car", "렌터카"), ("own_car", "자가용"), ("taxi", "택시")]
     transport_mode = models.CharField(max_length=20, choices=TRANSPORT_CHOICES)
 
-    COMPANION_CHOICES = [
-        ("alone", "혼자"), ("couple", "연인/배우자"), ("friend", "친구"),
-        ("family_kids", "아이와 가족"), ("parents", "부모님"), ("group", "단체"),
-    ]
-    companion_type = models.CharField(max_length=20, choices=COMPANION_CHOICES)
+    # ★ 신규: companion_type 삭제하고 이걸로 통일
+    guests = models.IntegerField(default=2, help_text="1~20명, 기본 2명 (AI Hub 실측 중앙값)")
 
     PURPOSE_CHOICES = [
-        ("nature", "힐링/자연"), ("food", "식당/카페"), ("photo", "사진/감성"),
+        ("nature", "힐링/자연"), ("food", "음식/카페"), ("photo", "사진/감성"),
         ("culture", "문화/역사"), ("activity", "체험/액티비티"), ("shopping", "쇼핑/시장"),
     ]
     purpose_main = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
     purpose_sub = models.CharField(max_length=20, choices=PURPOSE_CHOICES, blank=True)
 
-    # ★ 삭제: course_priority — RecommendedCourse.mode로 대체됨
+    # ★ 변경: "ALL"(제주 전역 무관) 추가돼 5종
+    REGION_CHOICES = [("NE", "북동"), ("NW", "북서"), ("SE", "남동"), ("SW", "남서"), ("ALL", "제주 전역 무관")]
+    region_preference = models.CharField(max_length=3, choices=REGION_CHOICES, default="ALL")
 
-    region_preference = models.CharField(max_length=2, blank=True, help_text="NE/NW/SE/SW")
-
-    mood_tags = models.JSONField(default=list, blank=True)
-    include_places = models.JSONField(default=list, blank=True)
-    exclude_places = models.JSONField(default=list, blank=True)
-    exclude_categories = models.JSONField(default=list, blank=True)
+    exclude_categories = models.JSONField(
+        default=list, blank=True,
+        help_text="TourAPI 중분류 코드 목록 (기획서 2.5 계층형 체크박스, 5개 대분류 하위 중분류)"
+    )
     walk_light = models.BooleanField(default=False)
     indoor_outdoor_pref = models.CharField(max_length=20, blank=True)
     free_text_input = models.TextField(blank=True)
 
     food_pref_1 = models.CharField(max_length=30, blank=True)
     food_pref_2 = models.CharField(max_length=30, blank=True)
-    food_restriction = models.CharField(max_length=30, blank=True)
     food_cafe_balance = models.CharField(max_length=20, blank=True)
+    # ★ 삭제: food_restriction — 최종 기획서에 명시 없음, 자유입력으로 흡수 추정 (팀 확인 필요)
 
-    lodging_capacity = models.IntegerField(null=True, blank=True)
-    lodging_type = models.CharField(max_length=30, blank=True)
-    lodging_conditions = models.JSONField(default=list, blank=True)
-    lodging_budget = models.IntegerField(null=True, blank=True)
+    # ★ 변경: lodging_capacity 삭제(guests로 통일), lodging_conditions(리스트) → 단일 bool
+    lodging_type = models.CharField(max_length=30, blank=True, default="상관없음")
+    lodging_need_cooking = models.BooleanField(default=False)
     lodging_free_text = models.TextField(blank=True)
+    # ★ 삭제: lodging_budget — 필터에 안 쓰고 문구만이라 accommodations 쪽에서 처리(price_hint)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -119,6 +111,14 @@ class ItineraryDay(models.Model):
     lodging_options = models.JSONField(
         default=list, blank=True,
         help_text="숙박 후보 top3의 content_id 목록. 사용자가 다른 숙소로 바꿀 때 이 중에서 고름"
+    )
+
+    lodging_snapshot = models.JSONField(
+        null=True, blank=True,
+        help_text="선택된 숙소의 LodgingCard.to_dict() 스냅샷 (별도 테이블 없이 통째 저장)"
+    )
+    lodging_options_snapshot = models.JSONField(
+        default=list, blank=True, help_text="추천된 top3 LodgingCard.to_dict() 리스트"
     )
 
     class Meta:
