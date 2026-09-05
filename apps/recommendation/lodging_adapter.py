@@ -6,6 +6,7 @@ LodgingRequest로 변환 → recommend_anchor() 호출 → 결과를 다시 우�
 
 from accommodations.lodging_filter import TripContext, LodgingRequest
 from accommodations.recommend import LodgingRecommender
+from typing import Optional
 
 VEHICLE_MAP = {
     "rental_car": "rental",
@@ -21,7 +22,7 @@ def _to_date_str(dt) -> str:
 def get_lodging_anchor(
     trip,                          # apps.trips.models.TripRequest 인스턴스
     day_last_place_ids: list[str],  # 각 박(night)의 그날 마지막 방문 장소 content_id
-    day_regions: list[str] | None = None,
+    day_regions: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     여행 전체 숙소 추천(앵커 1곳)을 실행하고 LodgingCard 리스트를 dict로 반환.

@@ -318,7 +318,7 @@ class LodgingRecommender:
         self._travel_time_fn = travel_time_fn
         self._engine = engine
         if travel_time_fn is None and engine is None:
-            from hybrid_engine import HybridRoutingEngine
+            from apps.routing.hybrid_engine import HybridRoutingEngine
 
             self._engine = HybridRoutingEngine()
 

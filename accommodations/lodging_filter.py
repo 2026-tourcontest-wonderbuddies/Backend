@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from enum import Enum
 
-from lodging_data import ANY_TYPE, LODGING_TYPE_MAP, Lodging, Tri
+from accommodations.lodging_data import ANY_TYPE, LODGING_TYPE_MAP, Lodging, Tri
 
 log = logging.getLogger(__name__)
 

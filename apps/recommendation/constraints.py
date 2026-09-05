@@ -52,6 +52,7 @@ class DayAvailability:
     avail_hours: float
     avail_start_min: int   # 그날 활동 시작 시각(분, 0~1440 범위의 하루 내 분)
     avail_end_min: int
+    need_morning: bool
     need_lunch: bool
     need_dinner: bool
     need_night_spot: bool

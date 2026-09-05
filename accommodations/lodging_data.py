@@ -24,12 +24,12 @@ from pathlib import Path
 
 import pandas as pd
 
-from booking_link import load_hotel_map
+from accommodations.booking_link import load_hotel_map
 
 log = logging.getLogger(__name__)
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
-LODGING_CSV = PROJECT_DIR / "TourAPI" / "숙박.csv"
+LODGING_CSV = PROJECT_DIR / "TourAPI" / "lodging.csv"
 
 # TourAPI 가 값을 못 채웠을 때 넣는 토큰들. 빈 문자열/NaN 과 같이 취급한다.
 _UNKNOWN_TOKENS = {"", "unknown", "nan", "none", "-"}

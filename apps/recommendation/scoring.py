@@ -68,6 +68,7 @@ def calc_pref(
 
     # 시너지 보너스 (주+보조 둘 다 높으면 가산, Clipping으로 1.0 초과 방지)
     synergy = (match_main * match_sub) * SYNERGY_BONUS_WEIGHT
+    pref_raw = pref_base + synergy
 
     return min(pref_raw, 1.0)
 
@@ -142,8 +143,8 @@ def score_candidate(
     travel_min = candidate["travel_min"]
     stay_min = candidate["stay_min"]
 
-    pref = calc_pref(tag_score, purpose_main, purpose_sub, nlp_match_score)
-    adjusted_qual = get_adjusted_qual(stay_stat)
+    pref = calc_pref(place, purpose_main, purpose_sub, nlp_match_score)
+    adjusted_qual = get_adjusted_qual(place)
     cost_move = calc_cost_move(travel_min)
     micro_score = calc_micro_score(
         mode, pref, adjusted_qual, cost_move, travel_min, stay_min, remain_time_min

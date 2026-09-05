@@ -15,6 +15,7 @@ from apps.recommendation.course_builder import beam_search_day, select_best_cour
 from apps.recommendation.food_scoring import build_meal_candidates, decide_food_slot_types
 from apps.recommendation.food_scoring import score_food_candidates
 from apps.recommendation.lodging_matcher import match_lodging_for_day
+from apps.recommendation.lodging_adapter import get_lodging_anchor
 
 
 MODES = ["dist", "pref", "relax"]
@@ -30,7 +31,7 @@ def _get_travel_time_fn(routing_engine, transport_mode: str):
 
 def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedCourse]:
     """
-    ★ 신규 진입점 — 3개 모드 각각에 대해 generate_one_course()를 호출한다.
+    3개 모드 각각에 대해 generate_one_course()를 호출한다.
     API 뷰에서는 이 함수 하나만 부르면 됨.
     """
     results = []
@@ -40,23 +41,27 @@ def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedC
     return results
 
 
+# 단일 코스 생성
 def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> RecommendedCourse:
     """모드 하나짜리 코스를 끝까지 생성해서 RecommendedCourse로 저장."""
+    # 총 여행 일수
     total_days = (trip.end_datetime.date() - trip.start_datetime.date()).days + 1
     quadrant = trip.region_preference
 
-    all_general_places = list(Place.objects.exclude(content_type_name="음식점"))
+    # 관광지/쇼핑/문화시설
+    all_general_places = list(Place.objects.filter(content_type_name__in=["관광지", "문화시설", "쇼핑"]))    # 음식점
     all_food_places = list(Place.objects.filter(content_type_name="음식점"))
 
     get_travel_time_fn = _get_travel_time_fn(routing_engine, trip.transport_mode)
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
-    course = RecommendedCourse.objects.create(trip=trip, mode=mode)
+    course = RecommendedCourse.objects.get_or_create(trip=trip, mode=mode)
 
     visited_across_days: set[str] = set()
 
     # ★ Day1 시작 장소 확정
     try:
+        # 출/도착지는 제주공항으로 고정 -> 제주공항으로 바꿔야함
         current_start_place = Place.objects.get(content_id=trip.departure_place_id)
     except Place.DoesNotExist:
         current_start_place = None  # 출발지 미입력/미매칭 시 좌표 없이 시작 (첫 이동시간 0 처리됨)
@@ -155,17 +160,22 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             last_place = chosen["place"]
             order += 1
 
-        # ★ 다음 날 출발지 = 오늘 마지막 장소 기준으로 매칭한 숙소 top1 (자동 확정)
-        if day_index < total_days and last_place:
-            lodging_candidates = match_lodging_for_day(
-                day_obj, last_place.latitude, last_place.longitude,
-                trip.lodging_capacity, trip.lodging_type, trip.lodging_conditions,
-            )
-            if lodging_candidates:
-                day_obj.lodging_options = [c["lodging"].content_id for c in lodging_candidates]
-                day_obj.lodging = lodging_candidates[0]["lodging"]  # top1 자동 확정
-                day_obj.save(update_fields=["lodging_options", "lodging"])
-                current_start_place = day_obj.lodging  # Lodging도 content_id를 가지므로 그대로 사용 가능
+    current_start_place = last_place
+
+    # ★ [신규 추가] 모든 Day의 코스 생성이 끝난 뒤, 여행 전체 앵커를 딱 한 번만 호출합니다.
+    day_last_place_ids = [
+        day.items.last().place.content_id
+        for day in course.days.all() if day.items.exists()
+    ]
+    
+    # 숙소 어댑터를 통해 여행 전체 앵커 카드(리스트)를 가져옴
+    lodging_cards = get_lodging_anchor(trip, day_last_place_ids)
+
+    # 마지막 날을 제외한 모든 Day에 숙소 스냅샷 반영
+    for day in course.days.exclude(day_index=total_days):
+        day.lodging_options_snapshot = lodging_cards
+        day.lodging_snapshot = lodging_cards[0] if lodging_cards else None
+        day.save(update_fields=["lodging_options_snapshot", "lodging_snapshot"])
 
     course.final_score = total_final_score / total_days
     course.save(update_fields=["final_score"])
