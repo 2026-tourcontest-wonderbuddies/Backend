@@ -137,8 +137,8 @@ def beam_search_day(
 
             excluded_ids = beam.visited_ids | visited_across_days
             # 이미 방문한 장소는 후보에서 제외
-            fresh_candidates = [p for p in candidate_pool if p.content_id not in beam.visited_ids]
-
+            fresh_candidates = [p for p in candidate_pool if p.content_id not in excluded_ids]              
+            
             filtered = filter_candidates(
                 current_place=beam.current_place,
                 candidates=fresh_candidates,

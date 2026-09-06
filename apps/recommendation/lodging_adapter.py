@@ -14,6 +14,13 @@ VEHICLE_MAP = {
     "taxi": "taxi",
 }
 
+REGION_MAP = {
+    "NE": "북부동",
+    "NW": "북부서",
+    "SE": "남부동",
+    "SW": "남부서",
+}
+
 # ★ accommodations 계약(§L0)이 요구하는 형식: 'YYYY-MM-DD'
 def _to_date_str(dt) -> str:
     return dt.strftime("%Y-%m-%d")
@@ -32,13 +39,18 @@ def get_lodging_anchor(
     """
     nights = (trip.end_datetime.date() - trip.start_datetime.date()).days
 
+    if nights <= 0:
+        return []
+
+    mapped_region = REGION_MAP.get(trip.region_preference)
+    regions = () if not mapped_region else (mapped_region,)
+
     trip_ctx = TripContext(
         start_date=_to_date_str(trip.start_datetime),
         nights=nights,
         guests=trip.guests,   # ★ companion_type 삭제, guests로 통일
         vehicle=VEHICLE_MAP.get(trip.transport_mode),
-        regions=() if not trip.region_preference or trip.region_preference == "ALL"
-                 else (trip.region_preference,),
+        regions=regions,
         day_last_place_ids=tuple(day_last_place_ids),
         day_regions=tuple(day_regions) if day_regions else (),
     )

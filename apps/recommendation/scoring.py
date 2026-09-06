@@ -27,14 +27,8 @@ def get_purpose_match(place, purpose_key: str) -> float:
     return place.get_purpose_score(purpose_key) / 100.0
 
 
-def calc_pref(
-    place,
-    purpose_main: str,
-    purpose_sub: str | None,
-    nlp_match_score: float | None = None,
-    use_dynamic_swap: bool = False,
-    prev_main_match: float | None = None,
-) -> float:
+def calc_pref(place, purpose_main, purpose_sub=None, nlp_match_score=None,
+              use_dynamic_swap=False, prev_main_match=None) -> float:
     """
     Pipeline 5.2-① Pref_k 계산.
 

@@ -9,7 +9,13 @@ Pipeline 6.2: 자유 문장 수정 요청을 구조화된 delta로 변환.
 import json
 from anthropic import Anthropic  # 또는 OpenAI
 
-client = Anthropic()
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = Anthropic()
+    return _client
 
 SYSTEM_PROMPT = """당신은 여행 코스 수정 요청을 구조화하는 도우미입니다.
 사용자의 자유 문장을 읽고 아래 JSON 스키마로만 응답하세요.
@@ -28,6 +34,14 @@ SYSTEM_PROMPT = """당신은 여행 코스 수정 요청을 구조화하는 도�
 
 장소명은 절대 지어내지 말고, 사용자 문장에 나온 이름만 그대로 쓰세요.
 """
+
+def _strip_code_fence(text: str) -> str:
+    """★ 추가: Claude가 ```json ... ``` 로 감싸서 응답할 경우 대비 방어 코드."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text
+        text = text.rsplit("```", 1)[0]
+    return text.strip()
 
 
 def parse_modification_request(raw_message: str) -> dict:

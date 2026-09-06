@@ -14,7 +14,6 @@ from apps.recommendation.constraints import calc_avail_hours, calc_target_slots
 from apps.recommendation.course_builder import beam_search_day, select_best_course, calc_macro_score
 from apps.recommendation.food_scoring import build_meal_candidates, decide_food_slot_types
 from apps.recommendation.food_scoring import score_food_candidates
-from apps.recommendation.lodging_matcher import match_lodging_for_day
 from apps.recommendation.lodging_adapter import get_lodging_anchor
 
 
@@ -34,11 +33,7 @@ def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedC
     3개 모드 각각에 대해 generate_one_course()를 호출한다.
     API 뷰에서는 이 함수 하나만 부르면 됨.
     """
-    results = []
-    for mode in MODES:
-        course = generate_one_course(trip, routing_engine, mode)
-        results.append(course)
-    return results
+    return [generate_one_course(trip, routing_engine, mode) for mode in MODES]
 
 
 # 단일 코스 생성
@@ -49,23 +44,17 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     quadrant = trip.region_preference
 
     # 관광지/쇼핑/문화시설
-    all_general_places = list(Place.objects.filter(content_type_name__in=["관광지", "문화시설", "쇼핑"]))    # 음식점
+    all_general_places = list(Place.objects.exclude(content_type_name="음식점"))    # 음식점
     all_food_places = list(Place.objects.filter(content_type_name="음식점"))
 
     get_travel_time_fn = _get_travel_time_fn(routing_engine, trip.transport_mode)
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
-    course = RecommendedCourse.objects.get_or_create(trip=trip, mode=mode)
+    course = RecommendedCourse.objects.create(trip=trip, mode=mode)
 
     visited_across_days: set[str] = set()
-
-    # ★ Day1 시작 장소 확정
-    try:
-        # 출/도착지는 제주공항으로 고정 -> 제주공항으로 바꿔야함
-        current_start_place = Place.objects.get(content_id=trip.departure_place_id)
-    except Place.DoesNotExist:
-        current_start_place = None  # 출발지 미입력/미매칭 시 좌표 없이 시작 (첫 이동시간 0 처리됨)
-
+    current_start_place = None
+    day_last_place_ids: list[str] = []
     total_final_score = 0.0
 
     for day_index in range(1, total_days + 1):
@@ -82,16 +71,14 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         general_target = max(target_slots - len(food_slot_types), 0)
 
         courses = beam_search_day(
-            candidate_pool=all_general_places,
-            start_place=current_start_place,   # ★ Day1=출발지, Day2+=전날 숙소
+            candidate_pool=all_general_places, start_place=current_start_place,
             avail_hours=avail.avail_hours, target_slots=general_target, mode=mode,
             purpose_main=trip.purpose_main, purpose_sub=trip.purpose_sub,
             transport_mode=trip.transport_mode, region_quadrant=quadrant,
-            exclude_place_ids=trip.exclude_places, exclude_categories=trip.exclude_categories,
+            exclude_place_ids=[], exclude_categories=trip.exclude_categories,
             visit_start_datetime=visit_start_dt,
             get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
-            need_lunch=False, need_dinner=False,
-            visited_across_days=visited_across_days,
+            need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
         )
         best_course = select_best_course(courses, avail.avail_hours, mode)
         macro_result = calc_macro_score(best_course, avail.avail_hours * 60, mode) if best_course else {}
@@ -113,7 +100,6 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 arrive = current_time
                 current_time += timedelta(minutes=item["stay_min"])
                 depart = current_time
-
                 ItineraryItem.objects.create(
                     day=day_obj, order=order, place=item["place"], slot_type="GENERAL",
                     arrive_at=arrive, depart_at=depart, travel_min_from_prev=item["travel_min"],
@@ -123,35 +109,30 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 last_place = item["place"]
                 order += 1
 
-        # ★ 음식 슬롯: score_food_candidates()로 순위 매겨서 1등 선택
         meal_candidates, relaxed_ids = build_meal_candidates(
             all_food_places, quadrant, visit_start_dt,
-            trip.food_pref_1, trip.food_pref_2, trip.food_restriction,
+            trip.food_pref_1, trip.food_pref_2, "",  # ★ food_restriction 삭제됨
             is_open_at_fn=lambda p, dt: (True, True),
         )
         for slot_type in food_slot_types:
             role_candidates = [
-                p for p in meal_candidates
-                if p.content_id not in visited_across_days
+                p for p in meal_candidates if p.content_id not in visited_across_days
                 and (p.food_role == slot_type or (slot_type == "RESTAURANT" and p.food_role in ("RESTAURANT", "SNACK")))
             ]
-            if not role_candidates:
+            if not role_candidates or last_place is None:
                 continue
-
             remain_time = avail.avail_hours * 60 - (current_time - visit_start_dt).total_seconds() / 60
             ranked = score_food_candidates(
                 role_candidates, last_place, trip.purpose_main, trip.purpose_sub,
-                mode, remain_time, get_travel_time_fn,
+                mode, remain_time, get_travel_time_fn, relaxed_ids,
             )
             if not ranked:
                 continue
-            chosen = ranked[0]  # ★ 1등 선택
-
+            chosen = ranked[0]
             current_time += timedelta(minutes=chosen["travel_min"])
             arrive = current_time
             current_time += timedelta(minutes=chosen["stay_min"])
             depart = current_time
-
             ItineraryItem.objects.create(
                 day=day_obj, order=order, place=chosen["place"], slot_type=slot_type,
                 arrive_at=arrive, depart_at=depart, travel_min_from_prev=chosen["travel_min"],
@@ -160,13 +141,9 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             last_place = chosen["place"]
             order += 1
 
-    current_start_place = last_place
-
-    # ★ [신규 추가] 모든 Day의 코스 생성이 끝난 뒤, 여행 전체 앵커를 딱 한 번만 호출합니다.
-    day_last_place_ids = [
-        day.items.last().place.content_id
-        for day in course.days.all() if day.items.exists()
-    ]
+        if last_place and day_index < total_days:
+            day_last_place_ids.append(last_place.content_id)
+        current_start_place = None
     
     # 숙소 어댑터를 통해 여행 전체 앵커 카드(리스트)를 가져옴
     lodging_cards = get_lodging_anchor(trip, day_last_place_ids)
