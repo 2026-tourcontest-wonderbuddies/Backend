@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 from pathlib import Path
 import dj_database_url
 from decouple import config
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -41,12 +42,17 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     # 구글 로그인
+    'django.contrib.sites', 
     "allauth",
     "allauth.account",
+    "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
 
     # 새로 추가
     'rest_framework',
+    'rest_framework.authtoken',
+    'dj_rest_auth',
+    'dj_rest_auth.registration', 
     'corsheaders',
 
     # 앱
@@ -74,6 +80,31 @@ AUTHENTICATION_BACKENDS = [
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
+
+SITE_ID = 1
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'APP': {
+            'client_id': os.environ.get('GOOGLE_CLIENT_ID'),
+            'secret': os.environ.get('GOOGLE_SECRET'),
+            'key': ''
+        },
+        'SCOPE': ['profile', 'email'],
+    }
+}
+
+REST_AUTH = {
+    'USE_JWT': False,   # 세션+토큰 기반. React면 토큰을 localStorage 등에 저장해서 씀
+    'SESSION_LOGIN': False,
+}
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+}
 
 ROOT_URLCONF = 'config.urls'
 
