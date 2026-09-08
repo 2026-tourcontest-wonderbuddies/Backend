@@ -18,6 +18,9 @@ from apps.trips.serializers import (
 from apps.recommendation.engine import generate_all_courses
 from apps.recommendation.engine_provider import get_routing_engine
 from apps.nlp.modification_interpreter import parse_modification_request
+from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
+from allauth.socialaccount.providers.oauth2.client import OAuth2Client
+from dj_rest_auth.registration.views import SocialLoginView
 
 class TripRequestCreateView(APIView):
     def post(self, request):
@@ -107,3 +110,9 @@ class CourseModifyView(APIView):
         return Response({"log_id": log.id, "parsed_delta": delta,
                           "message": "수정 요청이 저장되었습니다. 재계산은 준비 중입니다."},
                          status=status.HTTP_202_ACCEPTED)
+
+class GoogleLoginView(SocialLoginView):
+    adapter_class = GoogleOAuth2Adapter
+    client_class = OAuth2Client
+    # React 개발 서버 주소. 배포 후에는 실제 배포된 프론트 주소로 바꿔야 함
+    callback_url = "http://localhost:3000"

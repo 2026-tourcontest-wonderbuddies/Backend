@@ -12,5 +12,5 @@ urlpatterns = [
      path("courses/<int:course_id>/select-lodging/",
          views.CourseSelectLodgingView.as_view()),
      path("courses/<int:course_id>/modify/", views.CourseModifyView.as_view()), 
-     path("auth/google/", GoogleLoginView.as_view()), 
+     path("auth/google/", views.GoogleLoginView.as_view()), 
 ]
