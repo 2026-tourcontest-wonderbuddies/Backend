@@ -24,12 +24,6 @@ class TripRequest(models.Model):
     start_datetime = models.DateTimeField(help_text="입국수속 마친 후 실제 활동 시작 시각 (제주공항 기준)")
     end_datetime = models.DateTimeField(help_text="복귀편 출발 위해 공항 도착 필요한 시각")
 
-    # ★ 삭제: departure_place_id, return_to_departure — 공항 암묵 고정이라 불필요
-
-    TRANSPORT_CHOICES = [("rental_car", "렌터카"), ("own_car", "자가용"), ("taxi", "택시")]
-    transport_mode = models.CharField(max_length=20, choices=TRANSPORT_CHOICES)
-
-    # ★ 신규: companion_type 삭제하고 이걸로 통일
     guests = models.IntegerField(default=2, help_text="1~20명, 기본 2명 (AI Hub 실측 중앙값)")
 
     PURPOSE_CHOICES = [
@@ -39,7 +33,7 @@ class TripRequest(models.Model):
     purpose_main = models.CharField(max_length=20, choices=PURPOSE_CHOICES)
     purpose_sub = models.CharField(max_length=20, choices=PURPOSE_CHOICES, blank=True)
 
-    # ★ 변경: "ALL"(제주 전역 무관) 추가돼 5종
+    # "ALL"(제주 전역 무관) 추가돼 5종
     REGION_CHOICES = [("NE", "북동"), ("NW", "북서"), ("SE", "남동"), ("SW", "남서"), ("ALL", "제주 전역 무관")]
     region_preference = models.CharField(max_length=3, choices=REGION_CHOICES, default="ALL")
 
@@ -47,14 +41,12 @@ class TripRequest(models.Model):
         default=list, blank=True,
         help_text="TourAPI 중분류 코드 목록 (기획서 2.5 계층형 체크박스, 5개 대분류 하위 중분류)"
     )
-    walk_light = models.BooleanField(default=False)
-    indoor_outdoor_pref = models.CharField(max_length=20, blank=True)
+
     free_text_input = models.TextField(blank=True)
 
     food_pref_1 = models.CharField(max_length=30, blank=True)
     food_pref_2 = models.CharField(max_length=30, blank=True)
     food_cafe_balance = models.CharField(max_length=20, blank=True)
-    # ★ 삭제: food_restriction — 최종 기획서에 명시 없음, 자유입력으로 흡수 추정 (팀 확인 필요)
 
     # ★ 변경: lodging_capacity 삭제(guests로 통일), lodging_conditions(리스트) → 단일 bool
     lodging_type = models.CharField(max_length=30, blank=True, default="상관없음")

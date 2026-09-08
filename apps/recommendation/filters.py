@@ -67,9 +67,7 @@ def fails_transport_constraint(place, transport_mode: str) -> bool:
     스코어링에서 처리하도록 False만 반환하는 placeholder로 둔다.
     렌터카인데 주차 '불가능'이 명시된 경우만 최소한으로 하드 제외한다.
     """
-    if transport_mode in ("rental_car", "own_car") and place.parking == "불가능":
-        return True
-    return False
+    return place.parking == "불가능"
 
 
 def check_time_budget(

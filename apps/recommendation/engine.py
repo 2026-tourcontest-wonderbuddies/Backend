@@ -19,12 +19,12 @@ from apps.recommendation.lodging_adapter import get_lodging_anchor
 
 MODES = ["dist", "pref", "relax"]
 
+DEFAULT_VEHICLE = "car"
+
 
 def _get_travel_time_fn(routing_engine, transport_mode: str):
-    vehicle = "car" if transport_mode in ("rental_car", "own_car") else "taxi"
-
     def _fn(origin_id: str, destination_id: str) -> dict:
-        return routing_engine.get_travel_time(origin_id, destination_id, mode="osrm", vehicle=vehicle)
+        return routing_engine.get_travel_time(origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE)
     return _fn
 
 
@@ -47,7 +47,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     all_general_places = list(Place.objects.exclude(content_type_name="음식점"))    # 음식점
     all_food_places = list(Place.objects.filter(content_type_name="음식점"))
 
-    get_travel_time_fn = _get_travel_time_fn(routing_engine, trip.transport_mode)
+    get_travel_time_fn = _get_travel_time_fn(routing_engine)
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
     course = RecommendedCourse.objects.create(trip=trip, mode=mode)
@@ -74,7 +74,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             candidate_pool=all_general_places, start_place=current_start_place,
             avail_hours=avail.avail_hours, target_slots=general_target, mode=mode,
             purpose_main=trip.purpose_main, purpose_sub=trip.purpose_sub,
-            transport_mode=trip.transport_mode, region_quadrant=quadrant,
+            transport_mode=DEFAULT_VEHICLE, region_quadrant=quadrant,
             exclude_place_ids=[], exclude_categories=trip.exclude_categories,
             visit_start_datetime=visit_start_dt,
             get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,

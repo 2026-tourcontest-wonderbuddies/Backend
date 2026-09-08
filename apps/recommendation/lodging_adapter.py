@@ -8,12 +8,6 @@ from accommodations.lodging_filter import TripContext, LodgingRequest
 from accommodations.recommend import LodgingRecommender
 from typing import Optional
 
-VEHICLE_MAP = {
-    "rental_car": "rental",
-    "own_car": "car",
-    "taxi": "taxi",
-}
-
 REGION_MAP = {
     "NE": "북부동",
     "NW": "북부서",
@@ -49,7 +43,7 @@ def get_lodging_anchor(
         start_date=_to_date_str(trip.start_datetime),
         nights=nights,
         guests=trip.guests,   # ★ companion_type 삭제, guests로 통일
-        vehicle=VEHICLE_MAP.get(trip.transport_mode),
+        vehicle="car",
         regions=regions,
         day_last_place_ids=tuple(day_last_place_ids),
         day_regions=tuple(day_regions) if day_regions else (),

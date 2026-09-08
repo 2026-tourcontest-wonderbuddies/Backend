@@ -14,9 +14,9 @@ class TripRequestSerializer(serializers.ModelSerializer):
         # lodging_capacity, lodging_conditions, return_to_departure) 목록에서 제거,
         # 신규 필드(guests, lodging_need_cooking) 추가
         fields = [
-            "id", "start_datetime", "end_datetime", "transport_mode", "guests",
+            "id", "start_datetime", "end_datetime", "guests",
             "purpose_main", "purpose_sub", "region_preference",
-            "exclude_categories", "walk_light", "indoor_outdoor_pref", "free_text_input",
+            "exclude_categories", "free_text_input",
             "food_pref_1", "food_pref_2", "food_cafe_balance",
             "lodging_type", "lodging_need_cooking", "lodging_free_text",
         ]
