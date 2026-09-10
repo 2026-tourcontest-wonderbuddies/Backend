@@ -1,4 +1,5 @@
 from django.db import models
+from django.conf import settings
 
 """
 TourAPI(관광지/문화시설/쇼핑/음식점) + 숙박 + Ai Hub 파생 데이터
@@ -201,3 +202,11 @@ class LodgingEmbedding(models.Model):
     lodging = models.OneToOneField(Lodging, primary_key=True, on_delete=models.CASCADE)
     search_text = models.TextField()
     # embedding = VectorField(dimensions=768)
+
+class SavedPlace(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_places")
+    place = models.ForeignKey(Place, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "place")

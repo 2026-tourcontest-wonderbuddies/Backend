@@ -35,6 +35,16 @@ class TripRequestCreateView(APIView):
         return Response({"trip_id": trip.id, "course_ids": {c.mode: c.id for c in courses}},
                          status=status.HTTP_201_CREATED)
 
+    def get(self, request):
+        """GET /api/trips/ — 내가 지금까지 만든 여행 요청 목록 (지난 추천 코스 이력)"""
+        trips = TripRequest.objects.filter(user=request.user).order_by("-created_at")
+        result = [{
+            "trip_id": t.id, "start_datetime": t.start_datetime, "end_datetime": t.end_datetime,
+            "created_at": t.created_at,
+            "courses": RecommendedCourseSummarySerializer(t.courses.all(), many=True).data,
+        } for t in trips]
+        return Response(result)
+
 
 class TripCoursesListView(APIView):
     def get(self, request, trip_id):

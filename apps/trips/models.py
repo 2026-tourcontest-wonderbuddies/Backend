@@ -139,6 +139,11 @@ class ItineraryItem(models.Model):
     adjusted_qual = models.FloatField(null=True, blank=True)
     cost_move = models.FloatField(null=True, blank=True)
 
+    is_relaxed_preference = models.BooleanField(
+        default=False,
+        help_text="선호 음식 태그 조건이 완화되어 선택된 항목인지 (문서 §소프트필터-4 투명성)"
+    )
+
     class Meta:
         ordering = ["day", "order"]
 

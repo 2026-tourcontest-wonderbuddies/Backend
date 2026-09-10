@@ -30,7 +30,6 @@ class PlaceSummarySerializer(serializers.ModelSerializer):
                   "latitude", "longitude", "overview", "hours_raw", "fees",
                   "parking", "stay_time_minutes"]
 
-
 class ItineraryItemSerializer(serializers.ModelSerializer):
     place = PlaceSummarySerializer(read_only=True)
 
@@ -39,16 +38,14 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
         fields = ["id", "order", "place", "slot_type", "arrive_at", "depart_at",
                   "travel_min_from_prev", "locked", "hours_uncertain"]
 
-
+# 일정 상세 정보
 class ItineraryDaySerializer(serializers.ModelSerializer):
     items = ItineraryItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = ItineraryDay
-        # ★ 수정: lodging(FK)/lodging_options → lodging_snapshot/lodging_options_snapshot로 교체
         fields = ["id", "day_index", "day_case", "avail_hours", "target_slots",
-                  "need_lunch", "need_dinner", "need_night_spot",
-                  "lodging_snapshot", "lodging_options_snapshot", "items"]
+                  "need_lunch", "need_dinner", "need_night_spot", "items"]
 
 
 class RecommendedCourseSerializer(serializers.ModelSerializer):
