@@ -7,14 +7,14 @@ Pipeline 6.2: 자유 문장 수정 요청을 구조화된 delta로 변환.
 """
 
 import json
-from anthropic import Anthropic  # 또는 OpenAI
+from openai import OpenAI
 
 _client = None
 
 def _get_client():
     global _client
     if _client is None:
-        _client = Anthropic()
+        _client = OpenAI()
     return _client
 
 SYSTEM_PROMPT = """당신은 여행 코스 수정 요청을 구조화하는 도우미입니다.
@@ -49,13 +49,16 @@ def parse_modification_request(raw_message: str) -> dict:
     Pipeline 6.2 의도 구조화. course_builder 재실행 시 이 delta를 넘겨서
     locked=True 처리, exclude_places에 추가, walk_light 플래그 갱신 등에 활용.
     """
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",  # 의도 분류는 가벼운 모델로 충분
+    response = _get_client().chat.completions.create(
+        model="gpt-4o-mini",
         max_tokens=500,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": raw_message}],
+        response_format={"type": "json_object"},   # JSON 강제 응답 (OpenAI 전용 기능)
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": raw_message},
+        ],
     )
-    text = response.content[0].text
+    text = _strip_code_fence(response.choices[0].message.content)
     return json.loads(text)
 
 
@@ -70,9 +73,9 @@ def generate_result_explanation(raw_message: str, before_summary: dict, after_su
         f"변경 후: {json.dumps(after_summary, ensure_ascii=False)}\n"
         f"위 변경사항을 자연스러운 한 문장으로 사용자에게 안내해줘."
     )
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    response = _get_client().chat.completions.create(
+        model="gpt-4o-mini",
         max_tokens=200,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    return response.choices[0].message.content
