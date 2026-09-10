@@ -15,6 +15,7 @@ from apps.recommendation.course_builder import beam_search_day, select_best_cour
 from apps.recommendation.food_scoring import build_meal_candidates, decide_food_slot_types
 from apps.recommendation.food_scoring import score_food_candidates
 from apps.recommendation.lodging_adapter import get_lodging_anchor
+from apps.recommendation.nlp_matching import calc_nlp_match_scores
 
 
 MODES = ["dist", "pref", "relax"]
@@ -41,7 +42,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     """모드 하나짜리 코스를 끝까지 생성해서 RecommendedCourse로 저장."""
     # 총 여행 일수
     total_days = (trip.end_datetime.date() - trip.start_datetime.date()).days + 1
-    quadrant = trip.region_preference
+    quadrant = None if trip.region_preference == "ALL" else trip.region_preference
 
     # 관광지/쇼핑/문화시설
     all_general_places = list(Place.objects.exclude(content_type_name="음식점"))    # 음식점
@@ -57,6 +58,8 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     day_last_place_ids: list[str] = []
     total_final_score = 0.0
 
+    nlp_scores = calc_nlp_match_scores(trip.free_text_input)
+
     for day_index in range(1, total_days + 1):
         avail = calc_avail_hours(day_index, total_days, trip.start_datetime, trip.end_datetime)
         target_slots = calc_target_slots(avail.avail_hours, mode, avail.need_night_spot)
@@ -65,8 +68,13 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         )
 
         purpose_selected = trip.purpose_main == "food" or trip.purpose_sub == "food"
+       
         food_slot_types = decide_food_slot_types(
-            purpose_selected, avail.need_lunch, avail.need_dinner, avail.avail_hours, trip.food_cafe_balance,
+            purpose_selected, 
+            avail.need_lunch, 
+            avail.need_dinner, 
+            avail.avail_hours, 
+            trip.food_cafe_balance,
         )
         general_target = max(target_slots - len(food_slot_types), 0)
 
@@ -78,7 +86,8 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             exclude_place_ids=[], exclude_categories=trip.exclude_categories,
             visit_start_datetime=visit_start_dt,
             get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
-            need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
+            need_morning=False, need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
+            nlp_match_score=None,
         )
         best_course = select_best_course(courses, avail.avail_hours, mode)
         macro_result = calc_macro_score(best_course, avail.avail_hours * 60, mode) if best_course else {}
@@ -121,11 +130,15 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             ]
             if not role_candidates or last_place is None:
                 continue
-            remain_time = avail.avail_hours * 60 - (current_time - visit_start_dt).total_seconds() / 60
+            remain_time = avail.avail_end_min - (current_time.hour * 60 + current_time.minute)
             ranked = score_food_candidates(
-                role_candidates, last_place, trip.purpose_main, trip.purpose_sub,
-                mode, remain_time, get_travel_time_fn, relaxed_ids,
+                role_candidates, current_place, trip.purpose_main, trip.purpose_sub,
+                mode, remain_time, get_travel_time_fn, 
+                relaxed_ids=relaxed_ids,
+                nlp_scores=nlp_scores,
             )
+            ranked = [r for r in ranked if r["travel_min"] + r["stay_min"] <= remain_time]
+
             if not ranked:
                 continue
             chosen = ranked[0]

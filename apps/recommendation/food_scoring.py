@@ -56,10 +56,6 @@ def passes_food_restriction(place: Place, restriction: str) -> bool:
 
 
 def matches_food_pref_tags(place: Place, prefs: list[str]) -> bool:
-    """
-    ★ 변경: food_tags 리스트와 선택한 선호 태그가 하나라도 겹치면 통과.
-    prefs는 FOOD_PREF_TO_TAG의 키 목록 (TripRequest.food_pref_1/2 값).
-    """
     if not prefs or "상관없음" in prefs:
         return True
     target_tags = {FOOD_PREF_TO_TAG[p] for p in prefs if p in FOOD_PREF_TO_TAG}
@@ -87,7 +83,7 @@ def filter_food_candidates(
     survivors = []
 
     for place in candidates:
-        if place.quadrant != quadrant:
+        if quadrant and place.quadrant != quadrant:
             continue
         is_open, _ = is_open_at_fn(place, visit_datetime)
         if not is_open:
@@ -130,7 +126,7 @@ def build_meal_candidates(
     # 완화: 선호태그 조건 제거하고 재계산 (권역·식사제한은 그대로 유지)
     relaxed_candidates, _ = filter_food_candidates(
         all_food_places, quadrant, visit_datetime,
-        food_pref_1="", food_pref_2="",  # ★ 태그 조건만 해제
+        food_pref_1="", food_pref_2="",
         food_restriction=food_restriction,
         is_open_at_fn=is_open_at_fn,
     )
@@ -163,23 +159,25 @@ def calc_pref_food(purpose_fit: float, query_fit: float | None = None) -> float:
 
 
 def score_food_candidates(
-    candidates: list[Place],        # build_meal_candidates로 필터링된 음식점 후보 리스트
+    candidates: list,        # build_meal_candidates로 필터링된 음식점 후보 리스트
     current_place,                   # 직전 장소 (이동시간 계산 기준점)
     purpose_main: str,
     purpose_sub: str,
     mode: str,                       # "dist" / "pref" / "relax"
     remain_time_min: float,
     get_travel_time_fn,
-    relaxed_ids: set[str] = None,    # ★ 추가: 완화 필터 적용된 place_id 집합 (소프트 필터 감점용)
+    relaxed_ids: set = None,
+    nlp_scores: dict = None,    # ★ 추가: 완화 필터 적용된 place_id 집합 (소프트 필터 감점용)
 ) -> list[dict]:
     """
-    각 음식점 후보에 Micro 점수를 매겨서 높은 순으로 정렬해 반환한다.
-    engine.py에서 이 함수의 결과 리스트 맨 앞([0])을 고르면 된다.
-
-    Returns: [{"place":, "travel_min":, "micro_score":, ...}, ...] 점수 내림차순 정렬됨
+    calc_purpose_fit()으로 시너지보너스 포함 PurposeFit 계산 ->
+    nlp_scores에서 이 장소의 QueryFit조회 -> calc_pref_food()로 최종 결합
+    relaxed_ids도 실제로 감점에 반영
     """
-    if relaxed_ids is None:
-        relaxed_ids = set()
+    from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score
+
+    relaxed_ids = relaxed_ids or set()
+    nlp_scores = nlp_scores or {}
 
     scored = []
     for place in candidates:
@@ -187,13 +185,16 @@ def score_food_candidates(
         travel_min = travel_result["duration_min_adjusted"]
         stay_min = place.stay_time_minutes
 
-        # 1. 여행 목적(purpose_main/sub) 매칭 점수 계산
-        match_main = get_purpose_match(place, purpose_main)
-        match_sub = get_purpose_match(place, purpose_sub) if purpose_sub else 0.0
-        
-        # 2. 원본의 시너지 반영 공식(calc_purpose_fit & calc_pref_food) 재사용
+        # PurposeFit: 목적 태그 매칭 + 시너지 보너스
+        match_main = get_purpose_match(place, purpose_main) * 100
+        match_sub = get_purpose_match(place, purpose_sub) * 100 if purpose_sub else 0.0
         purpose_fit = calc_purpose_fit(match_main, match_sub)
-        pref = calc_pref_food(purpose_fit)
+
+        # QueryFit: free_text_input 임베딩 유사도. nlp_matching.py가 만든 0~1 값을 0~100으로 스케일
+        raw_nlp = nlp_scores.get(place.content_id)
+        query_fit = raw_nlp * 100 if raw_nlp is not None else None
+        
+        pref = calc_pref_food(purpose_fit, query_fit)
 
         # 3. 품질 및 이동 비용 계산
         adjusted_qual = get_adjusted_qual(place)
@@ -212,6 +213,7 @@ def score_food_candidates(
             "pref": pref,
             "adjusted_qual": adjusted_qual,
             "micro_score": final_micro_score,
+            "is_relaxed": place.content_id in relaxed_ids,
         })
 
     # Micro 점수 내림차순 정렬
