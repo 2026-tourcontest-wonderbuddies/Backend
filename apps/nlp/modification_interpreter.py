@@ -8,13 +8,14 @@ Pipeline 6.2: 자유 문장 수정 요청을 구조화된 delta로 변환.
 
 import json
 from openai import OpenAI
+from decouple import config
 
 _client = None
 
 def _get_client():
     global _client
     if _client is None:
-        _client = OpenAI()
+        _client = OpenAI(api_key=config("OPENAI_API_KEY"))
     return _client
 
 SYSTEM_PROMPT = """당신은 여행 코스 수정 요청을 구조화하는 도우미입니다.
