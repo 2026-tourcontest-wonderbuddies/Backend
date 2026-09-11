@@ -137,6 +137,19 @@ class Place(models.Model):
     def __str__(self):
         return f"{self.title} ({self.content_type_name})"
 
+
+class PlaceImage(models.Model):
+    place = models.ForeignKey(Place, related_name="images", on_delete=models.CASCADE)
+    image_url = models.URLField(max_length=1000)
+    order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"{self.place.title} - image {self.order}"
+
+
 class Lodging(models.Model):
     """ 
     숙박 전용 테이블. 빔서치 후보X, 코스 완성 후 별도로 매칭
@@ -205,6 +218,14 @@ class LodgingEmbedding(models.Model):
     lodging = models.OneToOneField(Lodging, primary_key=True, on_delete=models.CASCADE)
     search_text = models.TextField()
     # embedding = VectorField(dimensions=768)
+
+class LodgingImage(models.Model):
+    lodging_content_id = models.CharField(max_length=30, db_index=True)
+    image_url = models.URLField(max_length=1000)
+    order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["order"]
 
 class SavedPlace(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_places")
