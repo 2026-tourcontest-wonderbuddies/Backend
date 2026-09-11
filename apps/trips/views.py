@@ -39,6 +39,9 @@ class TripRequestCreateView(APIView):
 
     def get(self, request):
         """GET /api/trips/ — 내가 지금까지 만든 여행 요청 목록 (지난 추천 코스 이력)"""
+        if not request.user.is_authenticated: 
+            return Response([])
+        
         trips = TripRequest.objects.filter(user=request.user).order_by("-created_at")
         result = [{
             "trip_id": t.id, "start_datetime": t.start_datetime, "end_datetime": t.end_datetime,
