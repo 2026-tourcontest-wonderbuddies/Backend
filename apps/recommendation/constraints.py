@@ -17,6 +17,7 @@ Baseline은 일차별 표가 아니라 단일 상수 7.0 (팀원 08.14 검증 �
 from __future__ import annotations
 from datetime import datetime
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 DAY_START_ANCHOR = 9 * 60
 DAY_END_ANCHOR = 21 * 60
@@ -32,6 +33,8 @@ HALLASAN_LAT = 33.3617
 HALLASAN_LNG = 126.5292
 JEJU_AIRPORT_LAT = 33.5104
 JEJU_AIRPORT_LNG = 126.4914
+
+KST = ZoneInfo("Asia/Seoul")
 
 
 @dataclass
@@ -49,7 +52,8 @@ class DayAvailability:
 
 
 def _minutes_of_day(dt: datetime) -> int:
-    return dt.hour * 60 + dt.minute
+    dt_kst = dt.astimezone(KST)
+    return dt_kst.hour * 60 + dt_kst.minute
 
 
 def calc_day_case(day_index: int, total_days: int) -> str:
