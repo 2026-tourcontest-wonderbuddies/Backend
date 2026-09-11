@@ -181,8 +181,12 @@ def score_food_candidates(
 
     scored = []
     for place in candidates:
-        travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
-        travel_min = travel_result["duration_min_adjusted"]
+        if current_place is not None:
+            travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
+            travel_min = travel_result["duration_min_adjusted"]
+        else:
+            travel_min = 0.0
+
         stay_min = place.stay_time_minutes
 
         # PurposeFit: 목적 태그 매칭 + 시너지 보너스
@@ -221,9 +225,11 @@ def score_food_candidates(
     return scored
 
 
-def decide_food_slot_types(purpose_selected, need_lunch, need_dinner, avail_hours, cafe_balance):
+def decide_food_slot_types(purpose_selected, need_morning, need_lunch, need_dinner, avail_hours, cafe_balance):
     """기존과 동일 로직 유지 (문서상 변경 없음)."""
     slots = []
+    if need_morning:
+        slots.append("RESTAURANT")
     if need_lunch:
         slots.append("RESTAURANT")
     if need_dinner:

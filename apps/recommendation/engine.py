@@ -44,10 +44,17 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     total_days = (trip.end_datetime.date() - trip.start_datetime.date()).days + 1
     quadrant = None if trip.region_preference == "ALL" else trip.region_preference
 
-    # 관광지/쇼핑/문화시설
-    all_general_places = list(Place.objects.exclude(content_type_name="음식점"))    # 음식점
-    all_food_places = list(Place.objects.filter(content_type_name="음식점"))
+    matrix_ids = set(routing_engine._pos.keys())
 
+    # 관광지/쇼핑/문화시설
+    all_general_places = list(
+        Place.objects.exclude(content_type_name="음식점")
+        .filter(content_id__in=matrix_ids)
+    )
+    all_food_places = list(
+        Place.objects.filter(content_type_name="음식점")
+        .filter(content_id__in=matrix_ids)
+    )
     get_travel_time_fn = _get_travel_time_fn(routing_engine)
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
@@ -90,7 +97,11 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
             nlp_match_score=None,
         )
+        print(f"[DEBUG] mode={mode}, day={day_index}, general_target={general_target}, beam결과 개수={len(courses)}")
+        if courses:
+            print(f"[DEBUG] best_course 후보 0번 아이템 수={len(courses[0].items)}")
         best_course = select_best_course(courses, avail.avail_hours, mode)
+        print(f"[DEBUG] best_course={best_course}, items={best_course.items if best_course else None}")
         macro_result = calc_macro_score(best_course, avail.avail_hours * 60, mode) if best_course else {}
         total_final_score += macro_result.get("final_score", 0)
 
@@ -129,11 +140,11 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 p for p in meal_candidates if p.content_id not in visited_across_days
                 and (p.food_role == slot_type or (slot_type == "RESTAURANT" and p.food_role in ("RESTAURANT", "SNACK")))
             ]
-            if not role_candidates or last_place is None:
+            if not role_candidates:
                 continue
             remain_time = avail.avail_end_min - (current_time.hour * 60 + current_time.minute)
             ranked = score_food_candidates(
-                role_candidates, current_place, trip.purpose_main, trip.purpose_sub,
+                role_candidates, last_place, trip.purpose_main, trip.purpose_sub,
                 mode, remain_time, get_travel_time_fn, 
                 relaxed_ids=relaxed_ids,
                 nlp_scores=nlp_scores,
@@ -158,6 +169,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         if last_place and day_index < total_days:
             day_last_place_ids.append(last_place.content_id)
         current_start_place = None
+        print(f"[DEBUG] Day{day_index}: last_place={last_place}, day_last_place_ids={day_last_place_ids}")
     
     # 숙소 어댑터를 통해 여행 전체 앵커 카드(리스트)를 가져옴
     lodging_cards = get_lodging_anchor(trip, day_last_place_ids)
