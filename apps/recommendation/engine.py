@@ -22,11 +22,39 @@ MODES = ["dist", "pref", "relax"]
 
 DEFAULT_VEHICLE = "car"
 
+LUNCH_TARGET_MIN = 12 * 60 + 30   # 점심시간: 12:30
+DINNER_TARGET_MIN = 18 * 60 + 30  # 저녁시간: 18:30
+
 
 def _get_travel_time_fn(routing_engine):
     def _fn(origin_id: str, destination_id: str) -> dict:
         return routing_engine.get_travel_time(origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE)
     return _fn
+
+def _split_evenly(total: int, n_parts: int) -> list[int]:
+    """total을 n_parts 구간에 최대한 고르게 분배 (나머지는 앞쪽 구간부터 +1)."""
+    if n_parts <= 0:
+        return [total]
+    base = total // n_parts
+    remainder = total % n_parts
+    return [base + (1 if i < remainder else 0) for i in range(n_parts)]
+
+def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk_target, mode,
+                        trip, region_quadrant, visit_start_dt, get_travel_time_fn, get_stay_time_fn,
+                        visited_across_days, nlp_scores):
+    if chunk_target <= 0 or chunk_avail_hours <= 0:
+        return None
+    courses = beam_search_day(
+        candidate_pool=all_general_places, start_place=start_place,
+        avail_hours=chunk_avail_hours, target_slots=chunk_target, mode=mode,
+        purpose_main=trip.purpose_main, purpose_sub=trip.purpose_sub,
+        transport_mode=DEFAULT_VEHICLE, region_quadrant=region_quadrant,
+        exclude_place_ids=[], exclude_categories=trip.exclude_categories,
+        visit_start_datetime=visit_start_dt,
+        get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
+        need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
+    )
+    return select_best_course(courses, chunk_avail_hours, mode)
 
 
 def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedCourse]:
@@ -39,33 +67,32 @@ def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedC
 
 # 단일 코스 생성
 def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> RecommendedCourse:
-    """모드 하나짜리 코스를 끝까지 생성해서 RecommendedCourse로 저장."""
-    # 총 여행 일수
     total_days = (trip.end_datetime.date() - trip.start_datetime.date()).days + 1
+
+    # ★ "ALL"(전역 무관)이면 필터 안 걸리게 None으로 변환
     quadrant = None if trip.region_preference == "ALL" else trip.region_preference
 
+    # ★ 이동시간 매트릭스에 없는 장소(부속섬 등) 제외
     matrix_ids = set(routing_engine._pos.keys())
 
-    # 관광지/쇼핑/문화시설
     all_general_places = list(
-        Place.objects.exclude(content_type_name="음식점")
-        .filter(content_id__in=matrix_ids)
+        Place.objects.exclude(content_type_name="음식점").filter(content_id__in=matrix_ids)
     )
     all_food_places = list(
-        Place.objects.filter(content_type_name="음식점")
-        .filter(content_id__in=matrix_ids)
+        Place.objects.filter(content_type_name="음식점").filter(content_id__in=matrix_ids)
     )
+
     get_travel_time_fn = _get_travel_time_fn(routing_engine)
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
-    course = RecommendedCourse.objects.create(trip=trip, mode=mode)
+    # ★ 자유입력 임베딩 유사도. nlp_matching.py가 현재 임시 비활성화 상태라 항상 {} 반환.
+    nlp_scores = calc_nlp_match_scores(trip.free_text_input)
 
+    course = RecommendedCourse.objects.create(trip=trip, mode=mode)
     visited_across_days: set[str] = set()
-    current_start_place = None
+    current_start_place = None   # 공항 출발이라 Day1 시작 좌표는 별도 처리 안 함
     day_last_place_ids: list[str] = []
     total_final_score = 0.0
-
-    nlp_scores = calc_nlp_match_scores(trip.free_text_input)
 
     for day_index in range(1, total_days + 1):
         avail = calc_avail_hours(day_index, total_days, trip.start_datetime, trip.end_datetime)
@@ -75,82 +102,118 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         )
 
         purpose_selected = trip.purpose_main == "food" or trip.purpose_sub == "food"
-       
+
+        # ★ need_morning 반영
         food_slot_types = decide_food_slot_types(
-            purpose_selected, 
-            avail.need_morning,
-            avail.need_lunch, 
-            avail.need_dinner, 
-            avail.avail_hours, 
-            trip.food_cafe_balance,
+            purpose_selected, avail.need_morning, avail.need_lunch, avail.need_dinner,
+            avail.avail_hours, trip.food_cafe_balance,
         )
         general_target = max(target_slots - len(food_slot_types), 0)
 
-        courses = beam_search_day(
-            candidate_pool=all_general_places, start_place=current_start_place,
-            avail_hours=avail.avail_hours, target_slots=general_target, mode=mode,
-            purpose_main=trip.purpose_main, purpose_sub=trip.purpose_sub,
-            transport_mode=DEFAULT_VEHICLE, region_quadrant=quadrant,
-            exclude_place_ids=[], exclude_categories=trip.exclude_categories,
-            visit_start_datetime=visit_start_dt,
-            get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
-            need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
-            nlp_match_score=None,
-        )
-        print(f"[DEBUG] mode={mode}, day={day_index}, general_target={general_target}, beam결과 개수={len(courses)}")
-        if courses:
-            print(f"[DEBUG] best_course 후보 0번 아이템 수={len(courses[0].items)}")
-        best_course = select_best_course(courses, avail.avail_hours, mode)
-        print(f"[DEBUG] best_course={best_course}, items={best_course.items if best_course else None}")
-        macro_result = calc_macro_score(best_course, avail.avail_hours * 60, mode) if best_course else {}
-        total_final_score += macro_result.get("final_score", 0)
+        # ★ 필수 식사(점심/저녁)만 시간순으로 체크포인트화. 나머지(카페 등)는 마지막에 처리.
+        meal_checkpoints = []
+        remaining_food_types = list(food_slot_types)
+        if avail.need_lunch and remaining_food_types:
+            t = max(avail.avail_start_min, min(LUNCH_TARGET_MIN, avail.avail_end_min))
+            meal_checkpoints.append((t, remaining_food_types.pop(0)))
+        if avail.need_dinner and remaining_food_types:
+            t = max(avail.avail_start_min, min(DINNER_TARGET_MIN, avail.avail_end_min))
+            meal_checkpoints.append((t, remaining_food_types.pop(0)))
+        meal_checkpoints.sort(key=lambda x: x[0])
+        extra_food_types = remaining_food_types
 
         day_obj = ItineraryDay.objects.create(
             course=course, day_index=day_index, day_case=avail.day_case,
             avail_hours=avail.avail_hours, target_slots=target_slots,
-            need_lunch=avail.need_lunch, need_dinner=avail.need_dinner, need_night_spot=avail.need_night_spot,
+            need_morning=avail.need_morning, need_lunch=avail.need_lunch,
+            need_dinner=avail.need_dinner, need_night_spot=avail.need_night_spot,
         )
 
         current_time = visit_start_dt
+        current_place = current_start_place
         order = 0
-        last_place = current_start_place
-
-        if best_course:
-            for item in best_course.items:
-                current_time += timedelta(minutes=item["travel_min"])
-                arrive = current_time
-                current_time += timedelta(minutes=item["stay_min"])
-                depart = current_time
-                ItineraryItem.objects.create(
-                    day=day_obj, order=order, place=item["place"], slot_type="GENERAL",
-                    arrive_at=arrive, depart_at=depart, travel_min_from_prev=item["travel_min"],
-                    hours_uncertain=item.get("hours_uncertain", False),
-                )
-                visited_across_days.add(item["place"].content_id)
-                last_place = item["place"]
-                order += 1
+        chunk_targets = _split_evenly(general_target, len(meal_checkpoints) + 1)
 
         meal_candidates, relaxed_ids = build_meal_candidates(
             all_food_places, quadrant, visit_start_dt,
-            trip.food_pref_1, trip.food_pref_2, "",  # ★ food_restriction 삭제됨
+            trip.food_pref_1, trip.food_pref_2, "",
             is_open_at_fn=lambda p, dt: (True, True),
         )
-        for slot_type in food_slot_types:
+
+        # ── 구간(관광) → 체크포인트(식사) → 구간(관광) → ... 순서로 진행 ──
+        segment_bounds = [cp[0] for cp in meal_checkpoints] + [avail.avail_end_min]
+        for seg_i, seg_end_min in enumerate(segment_bounds):
+            current_minute = current_time.hour * 60 + current_time.minute
+            chunk_avail_hours = max(0.0, (seg_end_min - current_minute) / 60)
+
+            best_chunk = _run_general_chunk(
+                all_general_places, current_place, chunk_avail_hours, chunk_targets[seg_i], mode,
+                trip, quadrant, current_time, get_travel_time_fn, get_stay_time_fn,
+                visited_across_days, nlp_scores,
+            )
+            if best_chunk:
+                for item in best_chunk.items:
+                    current_time += timedelta(minutes=item["travel_min"])
+                    arrive = current_time
+                    current_time += timedelta(minutes=item["stay_min"])
+                    depart = current_time
+                    ItineraryItem.objects.create(
+                        day=day_obj, order=order, place=item["place"], slot_type="GENERAL",
+                        arrive_at=arrive, depart_at=depart, travel_min_from_prev=item["travel_min"],
+                        hours_uncertain=item.get("hours_uncertain", False),
+                    )
+                    visited_across_days.add(item["place"].content_id)
+                    current_place = item["place"]
+                    order += 1
+
+            # 이 구간 뒤에 식사 체크포인트가 있으면 삽입
+            if seg_i < len(meal_checkpoints):
+                slot_type = meal_checkpoints[seg_i][1]
+                remain_time = avail.avail_end_min - (current_time.hour * 60 + current_time.minute)
+                role_candidates = [
+                    p for p in meal_candidates if p.content_id not in visited_across_days
+                    and (p.food_role == slot_type or (slot_type == "RESTAURANT" and p.food_role in ("RESTAURANT", "SNACK")))
+                ]
+                # ★ current_place가 None(그날 첫 슬롯)이어도 건너뛰지 않음
+                if role_candidates:
+                    ranked = score_food_candidates(
+                        role_candidates, current_place, trip.purpose_main, trip.purpose_sub,
+                        mode, remain_time, get_travel_time_fn,
+                        relaxed_ids=relaxed_ids, nlp_scores=nlp_scores,
+                    )
+                    ranked = [r for r in ranked if r["travel_min"] + r["stay_min"] <= remain_time]
+                    if ranked:
+                        chosen = ranked[0]
+                        current_time += timedelta(minutes=chosen["travel_min"])
+                        arrive = current_time
+                        current_time += timedelta(minutes=chosen["stay_min"])
+                        depart = current_time
+                        ItineraryItem.objects.create(
+                            day=day_obj, order=order, place=chosen["place"], slot_type=slot_type,
+                            arrive_at=arrive, depart_at=depart, travel_min_from_prev=chosen["travel_min"],
+                            is_relaxed_preference=chosen.get("is_relaxed", False),
+                        )
+                        visited_across_days.add(chosen["place"].content_id)
+                        current_place = chosen["place"]
+                        order += 1
+
+        # ── 나머지 추가 식사/카페 슬롯 ──
+        for slot_type in extra_food_types:
+            remain_time = avail.avail_end_min - (current_time.hour * 60 + current_time.minute)
+            if remain_time <= 0:
+                continue
             role_candidates = [
                 p for p in meal_candidates if p.content_id not in visited_across_days
                 and (p.food_role == slot_type or (slot_type == "RESTAURANT" and p.food_role in ("RESTAURANT", "SNACK")))
             ]
             if not role_candidates:
                 continue
-            remain_time = avail.avail_end_min - (current_time.hour * 60 + current_time.minute)
             ranked = score_food_candidates(
-                role_candidates, last_place, trip.purpose_main, trip.purpose_sub,
-                mode, remain_time, get_travel_time_fn, 
-                relaxed_ids=relaxed_ids,
-                nlp_scores=nlp_scores,
+                role_candidates, current_place, trip.purpose_main, trip.purpose_sub,
+                mode, remain_time, get_travel_time_fn,
+                relaxed_ids=relaxed_ids, nlp_scores=nlp_scores,
             )
             ranked = [r for r in ranked if r["travel_min"] + r["stay_min"] <= remain_time]
-
             if not ranked:
                 continue
             chosen = ranked[0]
@@ -161,25 +224,37 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             ItineraryItem.objects.create(
                 day=day_obj, order=order, place=chosen["place"], slot_type=slot_type,
                 arrive_at=arrive, depart_at=depart, travel_min_from_prev=chosen["travel_min"],
+                is_relaxed_preference=chosen.get("is_relaxed", False),
             )
             visited_across_days.add(chosen["place"].content_id)
-            last_place = chosen["place"]
+            current_place = chosen["place"]
             order += 1
 
-        if last_place and day_index < total_days:
-            day_last_place_ids.append(last_place.content_id)
+        # ★ 마지막 날은 숙박이 없으므로 day_last_place_ids에 포함하지 않음
+        if current_place and day_index < total_days:
+            day_last_place_ids.append(current_place.content_id)
         current_start_place = None
-        print(f"[DEBUG] Day{day_index}: last_place={last_place}, day_last_place_ids={day_last_place_ids}")
-    
-    # 숙소 어댑터를 통해 여행 전체 앵커 카드(리스트)를 가져옴
-    lodging_cards = get_lodging_anchor(trip, day_last_place_ids)
 
-    # 마지막 날을 제외한 모든 Day에 숙소 스냅샷 반영
+        macro_result = calc_macro_score(
+            type("obj", (), {"items": [
+                {"micro_score": 0.5, "travel_min": 0, "stay_min": 0} for _ in range(order)
+            ]})(),
+            avail.avail_hours * 60, mode,
+        ) if order else {}
+        total_final_score += macro_result.get("final_score", 0)
+
+    # ── 숙박 앵커 계산 ──
+    expected_nights = total_days - 1
+    if len(day_last_place_ids) == expected_nights and day_last_place_ids:
+        lodging_cards = get_lodging_anchor(trip, day_last_place_ids)
+    else:
+        lodging_cards = []   # 일부 Day가 완전히 비어 개수가 안 맞으면 숙박 계산 스킵 (방어)
+
     for day in course.days.exclude(day_index=total_days):
         day.lodging_options_snapshot = lodging_cards
         day.lodging_snapshot = lodging_cards[0] if lodging_cards else None
         day.save(update_fields=["lodging_options_snapshot", "lodging_snapshot"])
 
-    course.final_score = total_final_score / total_days
+    course.final_score = total_final_score / total_days if total_days else 0
     course.save(update_fields=["final_score"])
     return course

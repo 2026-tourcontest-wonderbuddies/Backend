@@ -92,6 +92,7 @@ class ItineraryDay(models.Model):
 
     avail_hours = models.FloatField()
     target_slots = models.IntegerField()
+    need_morning = models.BooleanField(default=False)
     need_lunch = models.BooleanField(default=False)
     need_dinner = models.BooleanField(default=False)
     need_night_spot = models.BooleanField(default=False)
