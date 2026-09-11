@@ -23,9 +23,9 @@ class TripRequestSerializer(serializers.ModelSerializer):
 class PlaceSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = Place
-        fields = ["content_id", "title", "content_type_name", "address",
-                  "latitude", "longitude", "overview", "hours_raw", "fees",
-                  "parking", "stay_time_minutes"]
+        fields = ["content_id", "title", "content_type_name", "small_category_name", "address",
+                  "latitude", "longitude", "overview", "contact", "hours_raw", "closed_days_raw",
+                  "fees", "parking", "menu", "featured_menu", "stay_time_minutes"]
 
 class ItineraryItemSerializer(serializers.ModelSerializer):
     place = PlaceSummarySerializer(read_only=True)
