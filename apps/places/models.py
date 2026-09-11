@@ -22,6 +22,9 @@ class Place(models.Model):
     homepage = models.URLField(blank=True)
     contact = models.CharField(max_length=500, blank=True)
 
+    # overview+ai -> 2-3줄 요약
+    overview_summary = models.TextField(blank=True, default="")
+
     # 운영시간, 휴무일 (원본 텍스트 + 파싱 결과 분리 저장)
     hours_raw = models.CharField(max_length=1000, blank=True) # 원문 그대로(예: '11:20~30 (마지막 주문 19:50)). 파싱 실패 시 대조용 남겨둠
     closed_days_raw = models.CharField(max_length=200, blank=True)
