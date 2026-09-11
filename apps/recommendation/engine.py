@@ -71,6 +71,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
        
         food_slot_types = decide_food_slot_types(
             purpose_selected, 
+            avail.need_morning,
             avail.need_lunch, 
             avail.need_dinner, 
             avail.avail_hours, 
@@ -86,7 +87,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             exclude_place_ids=[], exclude_categories=trip.exclude_categories,
             visit_start_datetime=visit_start_dt,
             get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
-            need_morning=False, need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
+            need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
             nlp_match_score=None,
         )
         best_course = select_best_course(courses, avail.avail_hours, mode)
