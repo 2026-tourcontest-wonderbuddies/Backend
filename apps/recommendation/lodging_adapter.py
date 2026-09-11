@@ -7,6 +7,9 @@ LodgingRequest로 변환 → recommend_anchor() 호출 → 결과를 다시 우�
 from accommodations.lodging_filter import TripContext, LodgingRequest
 from accommodations.recommend import LodgingRecommender
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+KST = ZoneInfo("Asia/Seoul")
 
 REGION_MAP = {
     "NE": "북부동",
@@ -31,7 +34,10 @@ def get_lodging_anchor(
 
     Returns: [{"content_id":, "title":, "tripcom_link":, ...}, ...] (top 3)
     """
-    nights = (trip.end_datetime.date() - trip.start_datetime.date()).days
+    start_kst = trip.start_datetime.astimezone(KST)
+    end_kst = trip.end_datetime.astimezone(KST)
+
+    nights = (end_kst.date() - start_kst.date()).days
 
     if nights <= 0:
         return []
@@ -40,7 +46,7 @@ def get_lodging_anchor(
     regions = () if not mapped_region else (mapped_region,)
 
     trip_ctx = TripContext(
-        start_date=_to_date_str(trip.start_datetime),
+        start_date=start_kst.strftime("%Y-%m-%d"),
         nights=nights,
         guests=trip.guests,   # ★ companion_type 삭제, guests로 통일
         vehicle="car",

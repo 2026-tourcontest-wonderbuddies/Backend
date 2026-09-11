@@ -16,7 +16,9 @@ from apps.recommendation.food_scoring import build_meal_candidates, decide_food_
 from apps.recommendation.food_scoring import score_food_candidates
 from apps.recommendation.lodging_adapter import get_lodging_anchor
 from apps.recommendation.nlp_matching import calc_nlp_match_scores
+from zoneinfo import ZoneInfo
 
+KST = ZoneInfo("Asia/Seoul")
 
 MODES = ["dist", "pref", "relax"]
 
@@ -67,7 +69,10 @@ def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedC
 
 # 단일 코스 생성
 def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> RecommendedCourse:
-    total_days = (trip.end_datetime.date() - trip.start_datetime.date()).days + 1
+    start_kst = trip.start_datetime.astimezone(KST)
+    end_kst = trip.end_datetime.astimezone(KST)
+    
+    total_days = (end_kst.date() - start_kst.date()).days + 1
 
     # ★ "ALL"(전역 무관)이면 필터 안 걸리게 None으로 변환
     quadrant = None if trip.region_preference == "ALL" else trip.region_preference
@@ -97,7 +102,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     for day_index in range(1, total_days + 1):
         avail = calc_avail_hours(day_index, total_days, trip.start_datetime, trip.end_datetime)
         target_slots = calc_target_slots(avail.avail_hours, mode, avail.need_night_spot)
-        visit_start_dt = trip.start_datetime.replace(
+        visit_start_dt = start_kst.replace(
             hour=avail.avail_start_min // 60, minute=avail.avail_start_min % 60
         )
 
