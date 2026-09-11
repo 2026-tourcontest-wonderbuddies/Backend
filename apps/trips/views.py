@@ -54,7 +54,8 @@ class TripRequestCreateView(APIView):
 class TripCoursesListView(APIView):
     def get(self, request, trip_id):
         trip = get_object_or_404(TripRequest, id=trip_id)
-        serializer = RecommendedCourseSummarySerializer(trip.courses.all(), many=True)
+        courses = trip.courses.all().prefetch_related("days__items")
+        serializer = RecommendedCourseSummarySerializer(courses, many=True)
         return Response({"trip_id": trip.id, "courses": serializer.data})
 
 

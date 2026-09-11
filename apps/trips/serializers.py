@@ -50,10 +50,18 @@ class ItineraryDaySerializer(serializers.ModelSerializer):
             return None
         snap = obj.lodging_snapshot
         return {
+            "content_id": snap.get("content_id"),
             "title": snap.get("title"),
+            "category": snap.get("category"),
+            "price_hint": snap.get("price_hint"),
             "address": snap.get("address"),
+            "room_type": snap.get("room_type"),
             "check_in_time": snap.get("check_in_time"),
             "check_out_time": snap.get("check_out_time"),
+            "tripcom_link": snap.get("tripcom_link"),
+            "lat": snap.get("lat"),
+            "lon": snap.get("lon"),
+            "region": snap.get("region"),
         }
 
 
@@ -62,13 +70,43 @@ class RecommendedCourseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RecommendedCourse
-        fields = ["id", "mode", "final_score", "created_at", "days"]
+        fields = ["id", "mode", "is_selected", "final_score", "created_at", "days"]
 
-
+# 코스 요약
 class RecommendedCourseSummarySerializer(serializers.ModelSerializer):
+    place_count = serializers.SerializerMethodField()           # 방문한 장소 몇 곳
+    total_duration_min = serializers.SerializerMethodField()    # 총 소요시간
+    total_travel_min = serializers.SerializerMethodField()      # 총 이동시간 합계
+    days_summary = serializers.SerializerMethodField()          # day마다 장소 수/가용시간
+
     class Meta:
         model = RecommendedCourse
-        fields = ["id", "mode", "final_score", "created_at"]
+        fields = ["id", "mode", "is_selected", "final_score", "created_at",
+        "place_count", "total_duration_min", "total_travel_min", "days_summary"]
+
+    def get_place_count(self, obj):
+        return sum(day.items.count() for day in obj.days.all())
+
+    def get_total_duration_min(self, obj):
+        total = 0
+        for day in obj.days.all():
+            items = list(day.items.all())
+            if items:
+                total += int((items[-1].depart_at - items[0].arrive_at).total_seconds() / 60)
+        return total
+
+    def get_total_travel_min(self, obj):
+        return sum(
+            item.travel_min_from_prev or 0
+            for day in obj.days.all() for item in day.items.all()
+        )
+
+    def get_days_summary(self, obj):
+        """day마다 장소 몇 곳/가용시간 몇 시간인지."""
+        return [
+            {"day_index": day.day_index, "place_count": day.items.count(), "avail_hours": day.avail_hours}
+            for day in obj.days.all()
+        ]
 
 
 class ModifyRequestSerializer(serializers.Serializer):
