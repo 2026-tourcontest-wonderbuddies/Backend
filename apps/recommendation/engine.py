@@ -23,7 +23,7 @@ MODES = ["dist", "pref", "relax"]
 DEFAULT_VEHICLE = "car"
 
 
-def _get_travel_time_fn(routing_engine, transport_mode: str):
+def _get_travel_time_fn(routing_engine):
     def _fn(origin_id: str, destination_id: str) -> dict:
         return routing_engine.get_travel_time(origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE)
     return _fn

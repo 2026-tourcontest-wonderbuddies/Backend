@@ -21,14 +21,16 @@ from apps.nlp.modification_interpreter import parse_modification_request
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from dj_rest_auth.registration.views import SocialLoginView
+from django.db import transaction
 
 class TripRequestCreateView(APIView):
     def post(self, request):
         serializer = TripRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        trip = serializer.save(user=request.user if request.user.is_authenticated else None)
-        routing_engine = get_routing_engine()
+
         try:
+            trip = serializer.save(user=request.user if request.user.is_authenticated else None)
+            routing_engine = get_routing_engine()
             courses = generate_all_courses(trip, routing_engine)
         except Exception as e:
             return Response({"trip_id": trip.id, "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
