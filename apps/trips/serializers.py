@@ -10,9 +10,6 @@ from apps.places.models import Place, Lodging
 class TripRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = TripRequest
-        # ★ 수정: 삭제된 필드(departure_place_id, companion_type, food_restriction,
-        # lodging_capacity, lodging_conditions, return_to_departure) 목록에서 제거,
-        # 신규 필드(guests, lodging_need_cooking) 추가
         fields = [
             "id", "start_datetime", "end_datetime", "guests",
             "purpose_main", "purpose_sub", "region_preference",
@@ -45,7 +42,7 @@ class ItineraryDaySerializer(serializers.ModelSerializer):
     class Meta:
         model = ItineraryDay
         fields = ["id", "day_index", "day_case", "avail_hours", "target_slots",
-                  "need_lunch", "need_dinner", "need_night_spot", "items"]
+                "need_morning", "need_lunch", "need_dinner", "need_night_spot", "items"]
 
 
 class RecommendedCourseSerializer(serializers.ModelSerializer):
