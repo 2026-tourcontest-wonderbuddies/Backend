@@ -102,7 +102,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     for day_index in range(1, total_days + 1):
         avail = calc_avail_hours(day_index, total_days, trip.start_datetime, trip.end_datetime)
         target_slots = calc_target_slots(avail.avail_hours, mode, avail.need_night_spot)
-        visit_start_dt = trip.start_datetime.replace(
+        visit_start_dt = start_kst.replace(
             hour=avail.avail_start_min // 60, minute=avail.avail_start_min % 60
         )
 
