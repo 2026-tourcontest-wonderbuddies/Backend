@@ -7,7 +7,7 @@ scoring.py의 Pref_k 계산에 바로 쓰이는 "추천 로직의 일부"이기 
 """
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+
 
 _model = None
 _place_ids = None
@@ -17,6 +17,7 @@ _place_vectors = None
 def _load_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer
         _model = SentenceTransformer("nlpai-lab/KURE-v1")  # 팀이 쓴 것과 동일 모델
     return _model
 
@@ -39,8 +40,10 @@ def calc_nlp_match_scores(free_text: str) -> dict[str, float]:
 
     Returns: {content_id: 0~1 유사도, ...}
     """
-    if not free_text or _place_vectors is None:
+    if not free_text:
         return {}
+    if _place_vectors is None:
+        return {} 
 
     model = _load_model()
     query_vector = model.encode([free_text], normalize_embeddings=True)[0]
