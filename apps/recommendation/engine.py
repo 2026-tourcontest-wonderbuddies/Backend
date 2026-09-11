@@ -257,8 +257,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
 
     for day in course.days.exclude(day_index=total_days):
         day.lodging_options_snapshot = lodging_cards
-        day.lodging_snapshot = lodging_cards[0] if lodging_cards else None
-        day.save(update_fields=["lodging_options_snapshot", "lodging_snapshot"])
+        day.save(update_fields=["lodging_options_snapshot"])
 
     course.final_score = total_final_score / total_days if total_days else 0
     course.save(update_fields=["final_score"])

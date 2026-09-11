@@ -38,6 +38,7 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
 # 일정 상세 정보
 class ItineraryDaySerializer(serializers.ModelSerializer):
     items = ItineraryItemSerializer(many=True, read_only=True)
+    lodging = serializers.SerializerMethodField()
 
     class Meta:
         model = ItineraryDay

@@ -94,7 +94,7 @@ class CourseLodgingOptionsView(APIView):
             "lodging_options": first_day.lodging_options_snapshot,
         })
 
-
+# 선택된 숙소
 class CourseSelectLodgingView(APIView):
     """★ 수정: lodging_id(Django PK) → content_id(accommodations 카드 식별자) 기반."""
     def post(self, request, course_id):
@@ -107,12 +107,24 @@ class CourseSelectLodgingView(APIView):
         for day in course.days.all():
             match = next((c for c in day.lodging_options_snapshot if c.get("content_id") == content_id), None)
             if match:
-                day.lodging_snapshot = match
+                day.lodging_snapshot = match   # ← 이게 "숙소가 선택됐다"는 표시 그 자체
                 day.save(update_fields=["lodging_snapshot"])
                 updated += 1
+
         if not updated:
             return Response({"error": "추천 목록에 없는 숙소입니다."}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"course_id": course.id, "selected_content_id": content_id, "days_updated": updated})
+
+        # ★ 신규: 숙소 선택 = 이 코스가 최종 확정됐다는 뜻이므로, 코스도 함께 선택 처리
+        RecommendedCourse.objects.filter(trip=course.trip).update(is_selected=False)
+        course.is_selected = True
+        course.save(update_fields=["is_selected"])
+
+        return Response({
+            "course_id": course.id,
+            "is_selected": True,
+            "selected_content_id": content_id,
+            "days_updated": updated,
+        })
 
 
 class CourseModifyView(APIView):
