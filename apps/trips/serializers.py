@@ -42,7 +42,19 @@ class ItineraryDaySerializer(serializers.ModelSerializer):
     class Meta:
         model = ItineraryDay
         fields = ["id", "day_index", "day_case", "avail_hours", "target_slots",
-                "need_morning", "need_lunch", "need_dinner", "need_night_spot", "items"]
+                "need_morning", "need_lunch", "need_dinner", "need_night_spot", "lodging", "items"]
+
+    # 필요한 숙소 정보만 같이 보내기 
+    def get_lodging(self, obj):
+        if not obj.lodging_snapshot:
+            return None
+        snap = obj.lodging_snapshot
+        return {
+            "title": snap.get("title"),
+            "address": snap.get("address"),
+            "check_in_time": snap.get("check_in_time"),
+            "check_out_time": snap.get("check_out_time"),
+        }
 
 
 class RecommendedCourseSerializer(serializers.ModelSerializer):
@@ -50,13 +62,13 @@ class RecommendedCourseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = RecommendedCourse
-        fields = ["id", "mode", "is_selected", "final_score", "created_at", "days"]
+        fields = ["id", "mode", "final_score", "created_at", "days"]
 
 
 class RecommendedCourseSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = RecommendedCourse
-        fields = ["id", "mode", "is_selected", "final_score", "created_at"]
+        fields = ["id", "mode", "final_score", "created_at"]
 
 
 class ModifyRequestSerializer(serializers.Serializer):
