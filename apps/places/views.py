@@ -2,6 +2,7 @@ from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.places.models import SavedPlace
+from apps.trips.serializers import PlaceSummarySerializer
 
 # Create your views here.
 class PlaceSaveView(APIView):
@@ -22,4 +23,4 @@ class SavedPlaceListView(APIView):
     def get(self, request):
         saved = SavedPlace.objects.filter(user=request.user).select_related("place")
         places = [s.place for s in saved]
-        return Response(PlaceSummarySerializer(place, many=True).data)
+        return Response(PlaceSummarySerializer(places, many=True).data)
