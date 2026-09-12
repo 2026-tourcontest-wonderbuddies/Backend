@@ -48,11 +48,14 @@ class TripRequest(models.Model):
     food_pref_2 = models.CharField(max_length=30, blank=True)
     food_cafe_balance = models.CharField(max_length=20, blank=True)
 
-    # ★ 변경: lodging_capacity 삭제(guests로 통일), lodging_conditions(리스트) → 단일 bool
     lodging_type = models.CharField(max_length=30, blank=True, default="상관없음")
     lodging_need_cooking = models.BooleanField(default=False)
     lodging_free_text = models.TextField(blank=True)
-    # ★ 삭제: lodging_budget — 필터에 안 쓰고 문구만이라 accommodations 쪽에서 처리(price_hint)
+
+    # 날짜별 추가 입력: day_index, purpose_main, purpose_sub, region_preference, exclude_categories
+    day_overrides = models.JSONField(
+        default=list, blank=True
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 

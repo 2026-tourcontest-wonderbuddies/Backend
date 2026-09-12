@@ -16,6 +16,7 @@ class TripRequestSerializer(serializers.ModelSerializer):
             "exclude_categories", "free_text_input",
             "food_pref_1", "food_pref_2", "food_cafe_balance",
             "lodging_type", "lodging_need_cooking", "lodging_free_text",
+            "day_overrides"
         ]
         read_only_fields = ["id"]
 
@@ -29,11 +30,25 @@ class PlaceSummarySerializer(serializers.ModelSerializer):
 
 class ItineraryItemSerializer(serializers.ModelSerializer):
     place = PlaceSummarySerializer(read_only=True)
+    recommend_reason = serializers.SerializerMethodField()
 
     class Meta:
         model = ItineraryItem
         fields = ["id", "order", "place", "slot_type", "arrive_at", "depart_at",
-                  "travel_min_from_prev", "locked", "hours_uncertain"]
+                  "travel_min_from_prev", "locked", "hours_uncertain", "recommend_reason"]
+
+    # 장소 추천 이유
+    def get_recommend_reason(self, obj):
+        from apps.nlp.rag_qa import generate_place_recommend_reason
+
+        trip = obj.day.course.trip
+        day_index = obj.day.day_index
+
+        override = next((ov for ov in trip.day_overrides if ov.get("day_index") == day_index), None)
+        purpose_main = override.get("purpose_main", trip.purpose_main) if override else trip.purpose_main
+        purpose_sub = override.get("purpose_sub", trip.purpose_sub) if override else trip.purpose_sub
+
+        return generate_place_recommend_reason(obj.place, purpose_main, purpose_sub)
 
 # 일정 상세 정보
 class ItineraryDaySerializer(serializers.ModelSerializer):
