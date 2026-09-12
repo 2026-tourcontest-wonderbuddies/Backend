@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 from datetime import datetime, timedelta
+from apps.recommendation.constraints import estimate_airport_travel_min
 
 
 WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
@@ -123,7 +124,7 @@ def filter_candidates(
             travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
             travel_min = travel_result["duration_min_adjusted"]
         else:
-            travel_min = 0.0
+            travel_min = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)
 
         # 이동시간 60분 초과 시 사전 컷 (5.2-③ CostMove 주석: 단일 이동 60분 초과는 Micro 평가 전 컷)
         if travel_min > 60:

@@ -13,6 +13,7 @@
 from __future__ import annotations
 from apps.places.models import Place
 from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score
+from apps.recommendation.constraints import estimate_airport_travel_min
 
 MEAL_CAPABLE_ROLES = ("RESTAURANT", "SNACK")   # ★ 변경: 기존 RESTAURANT만 → SNACK 추가
 SOFT_FILTER_MIN_MEAL_CANDIDATES = 5
@@ -167,7 +168,8 @@ def score_food_candidates(
     remain_time_min: float,
     get_travel_time_fn,
     relaxed_ids: set = None,
-    nlp_scores: dict = None,    # ★ 추가: 완화 필터 적용된 place_id 집합 (소프트 필터 감점용)
+    nlp_scores: dict = None,    # 완화 필터 적용된 place_id 집합 (소프트 필터 감점용)
+    transport_mode="car",
 ) -> list[dict]:
     """
     calc_purpose_fit()으로 시너지보너스 포함 PurposeFit 계산 ->
@@ -185,7 +187,7 @@ def score_food_candidates(
             travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
             travel_min = travel_result["duration_min_adjusted"]
         else:
-            travel_min = 0.0
+            travel_min = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)
 
         stay_min = place.stay_time_minutes
 
