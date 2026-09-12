@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import timedelta
 from apps.places.models import Place
 from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, ItineraryItem
-from apps.recommendation.constraints import calc_avail_hours, calc_target_slots
+from apps.recommendation.constraints import calc_avail_hours, calc_target_slots, estimate_airport_travel_min
 from apps.recommendation.course_builder import beam_search_day, select_best_course, calc_macro_score
 from apps.recommendation.food_scoring import build_meal_candidates, decide_food_slot_types
 from apps.recommendation.food_scoring import score_food_candidates
@@ -42,21 +42,30 @@ def _split_evenly(total: int, n_parts: int) -> list[int]:
     return [base + (1 if i < remainder else 0) for i in range(n_parts)]
 
 def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk_target, mode,
-                        trip, region_quadrant, visit_start_dt, get_travel_time_fn, get_stay_time_fn,
+                        purpose_main, purpose_sub, exclude_categories, 
+                        region_quadrant, visit_start_dt, get_travel_time_fn, get_stay_time_fn,
                         visited_across_days, nlp_scores):
     if chunk_target <= 0 or chunk_avail_hours <= 0:
         return None
     courses = beam_search_day(
         candidate_pool=all_general_places, start_place=start_place,
         avail_hours=chunk_avail_hours, target_slots=chunk_target, mode=mode,
-        purpose_main=trip.purpose_main, purpose_sub=trip.purpose_sub,
+        purpose_main=purpose_main, purpose_sub=purpose_sub,
         transport_mode=DEFAULT_VEHICLE, region_quadrant=region_quadrant,
-        exclude_place_ids=[], exclude_categories=trip.exclude_categories,
+        exclude_place_ids=[], exclude_categories=exclude_categories,
         visit_start_datetime=visit_start_dt,
         get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
         need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
     )
     return select_best_course(courses, chunk_avail_hours, mode)
+
+
+# day_index 의 오버라이드 값을 찾아 반환, 없다면 None
+def _get_day_override(trip, day_index):
+    for ov in trip.day_overrides:
+        if ov.get("day_index") == day_index:
+            return ov
+    return None
 
 
 def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedCourse]:
@@ -74,10 +83,10 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     
     total_days = (end_kst.date() - start_kst.date()).days + 1
 
-    # ★ "ALL"(전역 무관)이면 필터 안 걸리게 None으로 변환
+    # "ALL"(전역 무관)이면 필터 안 걸리게 None으로 변환
     quadrant = None if trip.region_preference == "ALL" else trip.region_preference
 
-    # ★ 이동시간 매트릭스에 없는 장소(부속섬 등) 제외
+    # 이동시간 매트릭스에 없는 장소(부속섬 등) 제외
     matrix_ids = set(routing_engine._pos.keys())
 
     all_general_places = list(
@@ -90,7 +99,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     get_travel_time_fn = _get_travel_time_fn(routing_engine)
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
-    # ★ 자유입력 임베딩 유사도. nlp_matching.py가 현재 임시 비활성화 상태라 항상 {} 반환.
+    # 자유입력 임베딩 유사도. nlp_matching.py가 현재 임시 비활성화 상태라 항상 {} 반환.
     nlp_scores = calc_nlp_match_scores(trip.free_text_input)
 
     course = RecommendedCourse.objects.create(trip=trip, mode=mode)
@@ -100,7 +109,16 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     total_final_score = 0.0
 
     for day_index in range(1, total_days + 1):
-        avail = calc_avail_hours(day_index, total_days, trip.start_datetime, trip.end_datetime)
+        # 일마다 받은 입력, 오버라이드 있으면 그것으로 대체
+        override = _get_day_override(trip, day_index)
+        day_purpose_main = override.get("purpose_main", trip.purpose_main) if override else trip.purpose_main
+        day_purpose_sub = override.get("purpose_sub", trip.purpose_sub) if override else trip.purpose_sub
+        day_region = override.get("region_preference", trip.region_preference) if override else trip.region_preference
+        day_exclude = override.get("exclude_categories", trip.exclude_categories) if override else trip.exclude_categories
+
+        quadrant = None if day_region == "ALL" else day_region # DAY 마다 계산
+
+        avail = calc_avail_hours(day_index, total_days, start_kst, end_kst)
         target_slots = calc_target_slots(avail.avail_hours, mode, avail.need_night_spot)
         visit_start_dt = start_kst.replace(
             hour=avail.avail_start_min // 60, minute=avail.avail_start_min % 60
@@ -108,14 +126,14 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
 
         purpose_selected = trip.purpose_main == "food" or trip.purpose_sub == "food"
 
-        # ★ need_morning 반영
         food_slot_types = decide_food_slot_types(
-            purpose_selected, avail.need_morning, avail.need_lunch, avail.need_dinner,
+            day_purpose_main == "food" or day_purpose_sub == "food",
+            avail.need_morning, avail.need_lunch, avail.need_dinner,
             avail.avail_hours, trip.food_cafe_balance,
         )
         general_target = max(target_slots - len(food_slot_types), 0)
 
-        # ★ 필수 식사(점심/저녁)만 시간순으로 체크포인트화. 나머지(카페 등)는 마지막에 처리.
+        # 필수 식사(점심/저녁)만 시간순으로 체크포인트화. 나머지(카페 등)는 마지막에 처리.
         meal_checkpoints = []
         remaining_food_types = list(food_slot_types)
         if avail.need_lunch and remaining_food_types:
@@ -139,6 +157,10 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         order = 0
         chunk_targets = _split_evenly(general_target, len(meal_checkpoints) + 1)
 
+        airport_travel_override = None
+        if day_index == 1:
+            airport_travel_override = "day1_start"
+
         meal_candidates, relaxed_ids = build_meal_candidates(
             all_food_places, quadrant, visit_start_dt,
             trip.food_pref_1, trip.food_pref_2, "",
@@ -153,7 +175,8 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
 
             best_chunk = _run_general_chunk(
                 all_general_places, current_place, chunk_avail_hours, chunk_targets[seg_i], mode,
-                trip, quadrant, current_time, get_travel_time_fn, get_stay_time_fn,
+                day_purpose_main, day_purpose_sub, day_exclude,  
+                quadrant, current_time, get_travel_time_fn, get_stay_time_fn,
                 visited_across_days, nlp_scores,
             )
             if best_chunk:
@@ -182,7 +205,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 # ★ current_place가 None(그날 첫 슬롯)이어도 건너뛰지 않음
                 if role_candidates:
                     ranked = score_food_candidates(
-                        role_candidates, current_place, trip.purpose_main, trip.purpose_sub,
+                        role_candidates, current_place, day_purpose_main, day_purpose_sub,
                         mode, remain_time, get_travel_time_fn,
                         relaxed_ids=relaxed_ids, nlp_scores=nlp_scores,
                     )
@@ -214,7 +237,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             if not role_candidates:
                 continue
             ranked = score_food_candidates(
-                role_candidates, current_place, trip.purpose_main, trip.purpose_sub,
+                role_candidates, current_place, day_purpose_main, day_purpose_sub,
                 mode, remain_time, get_travel_time_fn,
                 relaxed_ids=relaxed_ids, nlp_scores=nlp_scores,
             )
