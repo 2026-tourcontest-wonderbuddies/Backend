@@ -1,3 +1,8 @@
+import json
+from functools import lru_cache
+from pathlib import Path
+
+from django.conf import settings
 from django.shortcuts import render
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -67,3 +72,50 @@ class PlaceAskView(APIView):
             )
 
         return Response({"content_id": content_id, "question": question, "answer": answer})
+
+PERIODS = ["dawn", "morning", "midday", "sunset", "night"]
+
+
+@lru_cache(maxsize=1)
+def _period_places():
+    """scripts/build_period_places.py 가 만든 정적 순위표."""
+    path = Path(settings.BASE_DIR) / "data" / "period_places.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+class PeriodPlacesView(APIView):
+    """
+    GET /api/places/by-period/?period=night&limit=10 — 시간대별 장소
+
+    아침/낮/노을/밤은 AI Hub 실측 도착시각(evidence="arrival"),
+    새벽은 영업·개방 시간(evidence="hours")이 근거다.
+    """
+
+    def get(self, request):
+        period = request.query_params.get("period", "")
+        if period not in PERIODS:
+            return Response(
+                {"error": f"period는 {PERIODS} 중 하나여야 합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            limit = int(request.query_params.get("limit", 10))
+        except ValueError:
+            return Response(
+                {"error": "limit은 정수여야 합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        limit = max(1, min(limit, 10))
+
+        rows = _period_places()[period][:limit]
+        places = Place.objects.in_bulk([r["content_id"] for r in rows])
+
+        results = []
+        for row in rows:
+            place = places.get(row["content_id"])
+            if place is None:  # 순위표에는 있는데 DB에서 사라진 장소
+                continue
+            results.append({**PlaceSummarySerializer(place).data, **row})
+
+        return Response({"period": period, "results": results})
