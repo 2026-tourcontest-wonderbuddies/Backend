@@ -6,6 +6,7 @@ LodgingRequest로 변환 → recommend_anchor() 호출 → 결과를 다시 우�
 
 from accommodations.lodging_filter import TripContext, LodgingRequest
 from accommodations.recommend import LodgingRecommender
+from apps.places.models import LodgingImage
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -65,6 +66,17 @@ def get_lodging_anchor(
     recommender = LodgingRecommender()  # engine=None → routing/hybrid_engine 자동 로드
     segments = recommender.recommend_anchor(trip_ctx, lodging_request, top_n=3)
 
-    # SPLIT_ANCHORS_ENABLED=False라 segments는 항상 길이 1 (앵커 1곳 고정, §6)
+    # 숙소 이미지 목록
     cards = segments[0].cards if segments else []
-    return [card.to_dict() for card in cards]
+
+    result = []
+    for card in cards:
+        card_dict = card.to_dict()
+        card_dict["images"] = list(
+            LodgingImage.objects.filter(lodging_content_id=card.content_id)
+            .order_by("order")
+            .values_list("image_url", flat=True)
+        )
+        result.append(card_dict)
+
+    return result
