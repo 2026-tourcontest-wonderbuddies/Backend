@@ -65,7 +65,7 @@ class TripRequest(models.Model):
 
 class RecommendedCourse(models.Model):
     """
-    ★ 신규 ★ — 코스 3개(dist/pref/relax) 중 하나를 담는 컨테이너.
+    코스 3개(dist/pref/relax) 중 하나를 담는 컨테이너.
     한 TripRequest당 이 레코드가 항상 3개 생긴다 (요청 시점에 3개 다 생성).
     """
     trip = models.ForeignKey(TripRequest, related_name="courses", on_delete=models.CASCADE)
@@ -78,6 +78,9 @@ class RecommendedCourse(models.Model):
     )
     final_score = models.FloatField(null=True, blank=True, help_text="course_builder의 Macro 최종점수, 감사용")
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # 코스 저장
+    is_saved = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ("trip", "mode")

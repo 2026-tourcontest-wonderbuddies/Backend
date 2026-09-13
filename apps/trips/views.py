@@ -145,3 +145,31 @@ class GoogleLoginView(SocialLoginView):
     client_class = OAuth2Client
     # React 개발 서버 주소. 배포 후에는 실제 배포된 프론트 주소로 바꿔야 함
     callback_url = "http://localhost:3000"
+
+# 코스 저장/삭제
+class CourseSaveView(APIView):
+    """POST /api/courses/{course_id}/save  DELETE"""
+
+    def post(self, request, course_id):
+        course = get_object_or_404(RecommendedCourse, id=course_id)
+        course.is_saved = True     
+        course.save(update_fields=["is_saved"])  
+        return Response({"course_id": course.id, "is_saved": True})
+
+    def delete(self, request, course_id):
+        course = get_object_or_404(RecommendedCourse, id=course_id)
+        course.is_saved = False
+        course.save(update_fields=["is_saved"])
+        return Response({"course_id": course.id, "is_saved": False})
+
+# 코스 저장 조회
+class SavedCourseListView(APIView):
+    """GET /api/courses/saved/ — 저장함 목록"""
+
+    def get(self, request):
+        if not request.user.is_authenticated:
+            return Response([])
+        courses = RecommendedCourse.objects.filter(
+            trip__user=request.user, is_saved=True
+        ).select_related("trip").prefetch_related("days__items")
+        return Response(RecommendedCourseSummarySerializer(courses, many=True).data)

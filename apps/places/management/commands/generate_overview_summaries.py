@@ -25,7 +25,8 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         # overview가 있고, 아직 요약이 안 된 것만 대상
-        targets = Place.objects.exclude(overview="").filter(overview_summary="")
+        # targets = Place.objects.exclude(overview="").filter(overview_summary="")
+        targets = Place.objects.exclude(overview="")
         total = targets.count()
         self.stdout.write(f"대상 {total}건 요약 시작...")
 
