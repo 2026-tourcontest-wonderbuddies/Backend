@@ -39,16 +39,18 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
 
     # 장소 추천 이유
     def get_recommend_reason(self, obj):
-        from apps.nlp.rag_qa import generate_place_recommend_reason
+        # 임시 비활성화
+        return None
+        # from apps.nlp.rag_qa import generate_place_recommend_reason
 
-        trip = obj.day.course.trip
-        day_index = obj.day.day_index
+        # trip = obj.day.course.trip
+        # day_index = obj.day.day_index
 
-        override = next((ov for ov in trip.day_overrides if ov.get("day_index") == day_index), None)
-        purpose_main = override.get("purpose_main", trip.purpose_main) if override else trip.purpose_main
-        purpose_sub = override.get("purpose_sub", trip.purpose_sub) if override else trip.purpose_sub
+        # override = next((ov for ov in trip.day_overrides if ov.get("day_index") == day_index), None)
+        # purpose_main = override.get("purpose_main", trip.purpose_main) if override else trip.purpose_main
+        # purpose_sub = override.get("purpose_sub", trip.purpose_sub) if override else trip.purpose_sub
 
-        return generate_place_recommend_reason(obj.place, purpose_main, purpose_sub)
+        # return generate_place_recommend_reason(obj.place, purpose_main, purpose_sub)
 
 # 일정 상세 정보
 class ItineraryDaySerializer(serializers.ModelSerializer):
