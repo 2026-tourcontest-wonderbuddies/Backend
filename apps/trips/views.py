@@ -10,14 +10,18 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
 
-from apps.trips.models import TripRequest, RecommendedCourse
+from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, ItineraryItem
 from apps.trips.serializers import (
     TripRequestSerializer, RecommendedCourseSerializer,
     RecommendedCourseSummarySerializer, PlaceSummarySerializer, ModifyRequestSerializer,
 )
 from apps.recommendation.engine import generate_all_courses
 from apps.recommendation.engine_provider import get_routing_engine
-from apps.nlp.modification_interpreter import parse_modification_request
+from apps.nlp.modification_interpreter import parse_modification_request, generate_result_explanation
+from apps.recommendation.course_modifier import (
+    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment,
+)
+
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from dj_rest_auth.registration.views import SocialLoginView
@@ -136,9 +140,53 @@ class CourseModifyView(APIView):
         raw_message = serializer.validated_data["raw_message"]
         delta = parse_modification_request(raw_message)
         log = course.modification_logs.create(raw_message=raw_message, parsed_delta=delta)
-        return Response({"log_id": log.id, "parsed_delta": delta,
-                          "message": "수정 요청이 저장되었습니다. 재계산은 준비 중입니다."},
-                         status=status.HTTP_202_ACCEPTED)
+        
+        locked_names = set(delta.get("locked_place_ids", []))
+        removed_names = set(delta.get("removed_place_ids", []))
+        scope = delta.get("recompute_scope", "partial")
+
+        before_summary = {"total_places": sum(d.items.count() for d in course.days.all())}
+        affected_days = []
+
+        if scope == "full":
+            # 전면 재추천 — 기존 것 지우고 generate_one_course 재사용
+            from apps.recommendation.engine import generate_one_course
+            from apps.recommendation.engine_provider import get_routing_engine
+            course.days.all().delete()
+            new_course = generate_one_course(course.trip, get_routing_engine(), course.mode)
+            course.final_score = new_course.final_score
+            new_course.days.all().update(course=course)
+            new_course.delete()
+            affected_days = [d.day_index for d in course.days.all()]
+        else:
+            # 부분 재계산 — 이름으로 장소 매칭해서 고정/삭제 표시 후, 미고정 구간만 재탐색
+            for day in course.days.all():
+                changed = False
+                for item in day.items.all():
+                    if item.place.title in locked_names and not item.locked:
+                        item.locked = True
+                        item.save(update_fields=["locked"])
+                        changed = True
+                    if item.place.title in removed_names:
+                        item.delete()
+                        changed = True
+                if changed:
+                    from apps.recommendation.course_modifier import resequence_orders
+                    resequence_orders(day)
+                    regenerate_unlocked_segment(
+                        day, day.course.trip.purpose_main, day.course.trip.purpose_sub, course.mode
+                    )
+                    affected_days.append(day.day_index)
+
+        after_summary = {"total_places": sum(d.items.count() for d in course.days.all())}
+        explanation = generate_result_explanation(raw_message, before_summary, after_summary)
+
+        return Response({
+            "log_id": log.id,
+            "parsed_delta": delta,
+            "affected_days": affected_days,
+            "message": explanation,
+        }, status=status.HTTP_200_OK)
 
 class GoogleLoginView(SocialLoginView):
     adapter_class = GoogleOAuth2Adapter
@@ -173,3 +221,101 @@ class SavedCourseListView(APIView):
             trip__user=request.user, is_saved=True
         ).select_related("trip").prefetch_related("days__items")
         return Response(RecommendedCourseSummarySerializer(courses, many=True).data)
+
+# 코스 수정
+class CourseItemReorderView(APIView):
+    """POST /api/courses/{course_id}/days/{day_index}/reorder/"""
+    def post(self, request, course_id, day_index):
+        day = get_object_or_404(ItineraryDay, course_id=course_id, day_index=day_index)
+        item_ids = request.data.get("item_ids")
+        if not item_ids:
+            return Response({"error": "item_ids가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        items = {i.id: i for i in day.items.all()}
+        for new_order, item_id in enumerate(item_ids):
+            if item_id not in items:
+                return Response({"error": f"item_id {item_id}가 이코스에 없습니다."}, status=status.HTTP_400_BAD_REQUEST)    
+            items[item_id].order = new_order
+            items[item_id].save(update_fields=["order"])
+
+        result = recalc_timeline_from(day, start_order=0)
+        return Response({
+            "day_index": day_index, "reordered": True,
+            "over_budget": result["over_budget"],
+            "message": "순서가 변경되어 이동시간과 시각이 재계산되었습니다." + (
+                " ⚠ 가용시간을 초과했습니다." if result["over_budget"] else ""
+            ),
+        })
+
+# 장소 삭제
+class CourseItemDeleteView(APIView):
+    """DELETE /api/courses/{course_id}/items/{item_id}/"""
+    def delete(self, request, course_id, item_id):
+        item = get_object_or_404(ItineraryItem, id=item_id, day__course_id=course_id)
+        day = item.day
+        deleted_order = item.order
+        item.delete()
+
+        resequence_orders(day)
+        result = recalc_timeline_from(day, start_order=max(deleted_order - 1, 0))
+        return Response({
+            "deleted": True, "day_index": day.day_index,
+            "message": "장소가 삭제되고 이후 일정이 재계산되었습니다.",
+        })
+
+# 장소 고정/해제
+class CourseItemLockView(APIView): 
+    """POST /api/courses/{course_id}/items/{item_id}/lock/  또는 DELETE로 해제"""
+    def post(self, request, course_id, item_id):
+        item = get_object_or_404(ItineraryItem, id=item_id, day__course_id=course_id)
+        item.locked = True
+        item.save(update_fields=["locked"])
+        return Response({"item_id": item.id, "locked": True})
+
+    def delete(self, request, course_id, item_id):
+        item = get_object_or_404(ItineraryItem, id=item_id, day__course_id=course_id)
+        item.locked = False
+        item.save(update_fields=["locked"])
+        return Response({"item_id": item.id, "locked": False})
+
+# 장소 추가
+class CourseItemAddView(APIView):
+    """
+    POST /api/courses/{course_id}/days/{day_index}/items/
+    Body: {"content_id": "126441", "order": 2}  ← 사용자가 직접 고른 장소를 그 위치에 삽입
+    """
+    def post(self, request, course_id, day_index):
+        from apps.places.models import Place
+        day = get_object_or_404(ItineraryDay, course_id=course_id, day_index=day_index)
+        content_id = request.data.get("content_id")
+        insert_order = request.data.get("order")
+        if content_id is None or insert_order is None:
+            return Response({"error": "content_id, order가 필요합니다."}, status=status.HTTP_400_BAD_REQUEST)
+
+        place = get_object_or_404(Place, content_id=content_id)
+
+        routing_engine = get_routing_engine()
+        if content_id not in routing_engine._pos:
+            return Response({"error": f"이 장소({place.title})는 이동시간 계산이 불가능해 추가할 수 없습니다."},
+                             status=status.HTTP_400_BAD_REQUEST)
+
+        # 삽입 위치 이후 항목들 order를 한 칸씩 밀기
+        for it in day.items.filter(order__gte=insert_order).order_by("-order"):
+            it.order += 1
+            it.save(update_fields=["order"])
+
+        ItineraryItem.objects.create(
+            day=day, order=insert_order, place=place, slot_type="GENERAL",
+            arrive_at=day.course.trip.start_datetime,  # 임시값, 아래서 재계산
+            depart_at=day.course.trip.start_datetime,
+            travel_min_from_prev=0,
+        )
+        result = recalc_timeline_from(day, start_order=max(insert_order - 1, 0))
+        return Response({
+            "added": True, "day_index": day_index,
+            "over_budget": result["over_budget"],
+            "message": "장소가 추가되고 이후 일정이 재계산되었습니다." + (
+                " ⚠ 가용시간을 초과했습니다." if result["over_budget"] else ""
+            ),
+        })
+

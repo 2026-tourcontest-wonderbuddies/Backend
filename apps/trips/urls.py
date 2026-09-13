@@ -13,7 +13,11 @@ urlpatterns = [
     path("courses/<int:course_id>/lodging-options/", views.CourseLodgingOptionsView.as_view()),
     path("courses/<int:course_id>/select-lodging/", views.CourseSelectLodgingView.as_view()),
     path("courses/<int:course_id>/modify/", views.CourseModifyView.as_view()),
-    path("courses/<int:course_id>/save/", views.CourseSaveView.as_view()),   # ★ 추가
+    path("courses/<int:course_id>/save/", views.CourseSaveView.as_view()),
+    path("courses/<int:course_id>/days/<int:day_index>/reorder/", views.CourseItemReorderView.as_view()),
+    path("courses/<int:course_id>/days/<int:day_index>/items/", views.CourseItemAddView.as_view()),
+    path("courses/<int:course_id>/items/<int:item_id>/", views.CourseItemDeleteView.as_view()),
+    path("courses/<int:course_id>/items/<int:item_id>/lock/", views.CourseItemLockView.as_view()),
 
     # 캐치올(가장 넓게 매칭)은 반드시 맨 마지막
     path("courses/<int:course_id>/", views.CourseDetailView.as_view()),

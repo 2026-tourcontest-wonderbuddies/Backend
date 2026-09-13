@@ -120,6 +120,9 @@ class ItineraryDay(models.Model):
         default=list, blank=True, help_text="추천된 top3 LodgingCard.to_dict() 리스트"
     )
 
+    # 그날 활동 시작 시간
+    avail_start_min = models.IntegerField(default=540)
+
     class Meta:
         ordering = ["day_index"]
         unique_together = ("course", "day_index")

@@ -148,6 +148,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         day_obj = ItineraryDay.objects.create(
             course=course, day_index=day_index, day_case=avail.day_case,
             avail_hours=avail.avail_hours, target_slots=target_slots,
+            avail_start_min=avail.avail_start_min,
             need_morning=avail.need_morning, need_lunch=avail.need_lunch,
             need_dinner=avail.need_dinner, need_night_spot=avail.need_night_spot,
         )
