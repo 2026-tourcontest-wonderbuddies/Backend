@@ -35,11 +35,8 @@ def get_lodging_anchor(
 
     Returns: [{"content_id":, "title":, "tripcom_link":, ...}, ...] (top 3)
     """
-    start_kst = trip.start_datetime.astimezone(KST)
-    end_kst = trip.end_datetime.astimezone(KST)
-
-    nights = (end_kst.date() - start_kst.date()).days
-
+    total_days = len(trip.day_schedules)
+    nights = total_days - 1
     if nights <= 0:
         return []
 
@@ -47,7 +44,7 @@ def get_lodging_anchor(
     regions = () if not mapped_region else (mapped_region,)
 
     trip_ctx = TripContext(
-        start_date=start_kst.strftime("%Y-%m-%d"),
+        start_date=trip.start_date.strftime("%Y-%m-%d"),
         nights=nights,
         guests=trip.guests,   # ★ companion_type 삭제, guests로 통일
         vehicle="car",

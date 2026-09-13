@@ -48,7 +48,7 @@ class TripRequestCreateView(APIView):
         
         trips = TripRequest.objects.filter(user=request.user).order_by("-created_at")
         result = [{
-            "trip_id": t.id, "start_datetime": t.start_datetime, "end_datetime": t.end_datetime,
+            "trip_id": t.id, "start_date": t.start_date, "end_date": t.end_date,
             "created_at": t.created_at,
             "courses": RecommendedCourseSummarySerializer(t.courses.all(), many=True).data,
         } for t in trips]
@@ -280,10 +280,6 @@ class CourseItemLockView(APIView):
 
 # 장소 추가
 class CourseItemAddView(APIView):
-    """
-    POST /api/courses/{course_id}/days/{day_index}/items/
-    Body: {"content_id": "126441", "order": 2}  ← 사용자가 직접 고른 장소를 그 위치에 삽입
-    """
     def post(self, request, course_id, day_index):
         from apps.places.models import Place
         day = get_object_or_404(ItineraryDay, course_id=course_id, day_index=day_index)
@@ -299,15 +295,18 @@ class CourseItemAddView(APIView):
             return Response({"error": f"이 장소({place.title})는 이동시간 계산이 불가능해 추가할 수 없습니다."},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        # 삽입 위치 이후 항목들 order를 한 칸씩 밀기
-        for it in day.items.filter(order__gte=insert_order).order_by("-order"):
+        for it in list(day.items.filter(order__gte=insert_order).order_by("-order")):   # ★ list()로 감싸서 안전하게
             it.order += 1
             it.save(update_fields=["order"])
 
+        # ★ 수정: trip.start_datetime 대신, 그날 날짜+시작시각 조합으로 임시값 생성 (recalc_timeline_from이 바로 덮어씀)
+        target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+        temp_dt = datetime(target_date.year, target_date.month, target_date.day,
+                            day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST)
+
         ItineraryItem.objects.create(
             day=day, order=insert_order, place=place, slot_type="GENERAL",
-            arrive_at=day.course.trip.start_datetime,  # 임시값, 아래서 재계산
-            depart_at=day.course.trip.start_datetime,
+            arrive_at=temp_dt, depart_at=temp_dt,
             travel_min_from_prev=0,
         )
         result = recalc_timeline_from(day, start_order=max(insert_order - 1, 0))

@@ -21,8 +21,9 @@ class TripRequest(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
                               related_name="trips", null=True, blank=True)
 
-    start_datetime = models.DateTimeField(help_text="입국수속 마친 후 실제 활동 시작 시각 (제주공항 기준)")
-    end_datetime = models.DateTimeField(help_text="복귀편 출발 위해 공항 도착 필요한 시각")
+    # 여행 출발/종료 날짜
+    start_date = models.DateField(help_text="입국수속 마친 후 실제 활동 시작 시각 (제주공항 기준)")
+    end_date = models.DateField(help_text="복귀편 출발 위해 공항 도착 필요한 시각")
 
     guests = models.IntegerField(default=2, help_text="1~20명, 기본 2명 (AI Hub 실측 중앙값)")
 
@@ -40,6 +41,11 @@ class TripRequest(models.Model):
     exclude_categories = models.JSONField(
         default=list, blank=True,
         help_text="TourAPI 중분류 코드 목록 (기획서 2.5 계층형 체크박스, 5개 대분류 하위 중분류)"
+    )
+
+    day_schedules = models.JSONField(
+        default=list,
+        help_text="[{day_index, start_time:'HH:MM', end_time:'HH:MM', purpose_main?, purpose_sub?, region_preference?, exclude_categories?}, ...]"
     )
 
     free_text_input = models.TextField(blank=True)

@@ -11,12 +11,12 @@ class TripRequestSerializer(serializers.ModelSerializer):
     class Meta:
         model = TripRequest
         fields = [
-            "id", "start_datetime", "end_datetime", "guests",
+            "id", "start_date", "end_date", "guests",   # ★ start_datetime/end_datetime → start_date/end_date
             "purpose_main", "purpose_sub", "region_preference",
             "exclude_categories", "free_text_input",
             "food_pref_1", "food_pref_2", "food_cafe_balance",
             "lodging_type", "lodging_need_cooking", "lodging_free_text",
-            "day_overrides"
+            "day_schedules",
         ]
         read_only_fields = ["id"]
 
@@ -86,8 +86,8 @@ class ItineraryDaySerializer(serializers.ModelSerializer):
 class RecommendedCourseSerializer(serializers.ModelSerializer):
     days = ItineraryDaySerializer(many=True, read_only=True)
     # 제주공항 기준 여행 양 끝 시각. 프론트가 타임라인 맨 위·맨 아래 공항 항목으로 쓴다.
-    trip_start_datetime = serializers.DateTimeField(source="trip.start_datetime", read_only=True)
-    trip_end_datetime = serializers.DateTimeField(source="trip.end_datetime", read_only=True)
+    trip_start_date = serializers.DateField(source="trip.start_date", read_only=True)
+    trip_end_date = serializers.DateField(source="trip.end_date", read_only=True)
 
     class Meta:
         model = RecommendedCourse

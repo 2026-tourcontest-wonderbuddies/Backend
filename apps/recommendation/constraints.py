@@ -156,3 +156,23 @@ def estimate_airport_travel_min(place_lat: float, place_lng: float, transport_mo
     distance_km = R * 2 * math.asin(math.sqrt(a)) * 1.3
     avg_speed_kmh = 40 if transport_mode in ("rental_car", "own_car") else 35
     return (distance_km / avg_speed_kmh) * 60
+
+
+def calc_avail_hours_from_schedule(day_index, total_days, day_start_kst, day_end_kst) -> DayAvailability:
+    start_min = max(_minutes_of_day(day_start_kst), DAY_START_ANCHOR)
+    end_min = min(_minutes_of_day(day_end_kst), DAY_END_ANCHOR)
+    avail_min = max(0, end_min - start_min)
+    avail_hours = avail_min / 60
+
+    day_case = "D" if total_days == 1 else ("A" if day_index == 1 else ("C" if day_index == total_days else "B"))
+
+    need_morning, need_lunch, need_dinner = check_meal_flags(start_min, end_min)
+    need_night = check_night_spot_flag(end_min)
+    target_slots = calc_target_slots(avail_hours, mode="pref", need_night_spot=need_night)
+
+    return DayAvailability(
+        day_index=day_index, day_case=day_case, avail_hours=round(avail_hours, 2),
+        avail_start_min=start_min, avail_end_min=end_min,
+        need_morning=need_morning, need_lunch=need_lunch, need_dinner=need_dinner,
+        need_night_spot=need_night, target_slots=target_slots,
+    )

@@ -6,7 +6,7 @@ from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, Itin
 
 @admin.register(TripRequest)
 class TripRequestAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "start_datetime", "end_datetime", "created_at")
+    list_display = ("id", "user", "start_date", "end_date", "created_at")   # ★ 수정
     list_filter = ("purpose_main", "region_preference")
     ordering = ("-created_at",)
 
