@@ -83,10 +83,14 @@ class ItineraryDaySerializer(serializers.ModelSerializer):
 
 class RecommendedCourseSerializer(serializers.ModelSerializer):
     days = ItineraryDaySerializer(many=True, read_only=True)
+    # 제주공항 기준 여행 양 끝 시각. 프론트가 타임라인 맨 위·맨 아래 공항 항목으로 쓴다.
+    trip_start_datetime = serializers.DateTimeField(source="trip.start_datetime", read_only=True)
+    trip_end_datetime = serializers.DateTimeField(source="trip.end_datetime", read_only=True)
 
     class Meta:
         model = RecommendedCourse
-        fields = ["id", "mode", "is_selected", "final_score", "created_at", "days"]
+        fields = ["id", "mode", "is_selected", "final_score", "created_at",
+                  "trip_start_datetime", "trip_end_datetime", "days"]
 
 # 코스 요약
 class RecommendedCourseSummarySerializer(serializers.ModelSerializer):
