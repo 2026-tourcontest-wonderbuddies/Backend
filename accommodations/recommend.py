@@ -44,9 +44,9 @@ for _path in (str(MODULE_DIR), str(ROUTING_DIR)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from booking_link import BookingLinkBuilder, price_hint  # noqa: E402
-from lodging_data import Lodging, Tri, load_lodgings  # noqa: E402
-from lodging_filter import (  # noqa: E402
+from accommodations.booking_link import BookingLinkBuilder, price_hint  # noqa: E402
+from accommodations.lodging_data import Lodging, Tri, load_lodgings  # noqa: E402
+from accommodations.lodging_filter import (  # noqa: E402
     ConditionCheck,
     FilterResult,
     LodgingRequest,
@@ -55,8 +55,8 @@ from lodging_filter import (  # noqa: E402
     exclusion_summary,
     filter_candidates,
 )
-from lodging_stop import LodgingStop, plan_stops, render_stops  # noqa: E402
-from query_fit import PREFERRED_POOL_SIZE, Embedder, QueryFitIndex, top_query_fit  # noqa: E402
+from accommodations.lodging_stop import LodgingStop, plan_stops, render_stops  # noqa: E402
+from accommodations.query_fit import PREFERRED_POOL_SIZE, Embedder, QueryFitIndex, top_query_fit  # noqa: E402
 
 log = logging.getLogger(__name__)
 
