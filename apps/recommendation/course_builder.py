@@ -25,12 +25,10 @@ BEAM_WIDTH = 10          # 5.4 유지 코스 수 (계산량 부담되면 5로 �
 TOP_K_EXPAND = 5         # 매 단계 확장 후보 수
 SAFETY_CAP_SLOTS = 12
 
-TARGET_SLACK = {"dist": 0.05, "pref": 0.10, "relax": 0.20}
-
 MACRO_WEIGHTS = {
-    "dist":  {"pref": 0.20, "qual": 0.10, "move_eff": 0.60, "slack": 0.10},
-    "pref":  {"pref": 0.60, "qual": 0.20, "move_eff": 0.15, "slack": 0.05},
-    "relax": {"pref": 0.35, "qual": 0.20, "move_eff": 0.25, "slack": 0.20},
+    "dist":  {"pref": 0.20, "qual": 0.10, "move_eff": 0.70},
+    "pref":  {"pref": 0.65, "qual": 0.20, "move_eff": 0.15},
+    "relax": {"pref": 0.50, "qual": 0.30, "move_eff": 0.20},
 }
 
 
@@ -188,43 +186,31 @@ def calc_move_eff(total_travel_min, avail_min):
     return 100 * max(0, min(1, raw))
 
 
-def calc_slack_score(total_used_min, avail_min, mode):
-    """5.5-SlackScore."""
-    target_slack = TARGET_SLACK[mode]
-    slack_ratio = max(avail_min - total_used_min, 0) / avail_min if avail_min > 0 else 0
-    return 100 * min(slack_ratio / target_slack, 1.0)
-
-
 def calc_macro_score(course: PartialCourse, avail_min: float, mode: str) -> dict:
     """5.5~5.6 완성 코스 하나의 Macro 점수를 전부 계산해서 반환."""
     n = len(course.items)
     if n == 0:
-        return {"final_score": -1, "move_eff": 0, "slack_score": 0, "avg_pref": 0, "avg_qual": 0}
+        return {"final_score": -1, "move_eff": 0, "avg_pref": 0, "avg_qual": 0}
 
     avg_pref = sum(item["micro_score"] for item in course.items) / n * 100  # 근사치 (엄밀히는 Pref_k 별도 누적 필요)
     total_travel = sum(item["travel_min"] for item in course.items)
-    total_stay = sum(item["stay_min"] for item in course.items)
-    total_used = total_travel + total_stay
 
     move_eff = calc_move_eff(total_travel, avail_min)
-    slack_score = calc_slack_score(total_used, avail_min, mode)
 
     # 이동비율 35% 이상이면 해당 코스 자체를 원천 제외 (표 비고란 규칙)
     if move_eff == 0 and (total_travel / avail_min if avail_min > 0 else 1) >= 0.35:
-        return {"final_score": -1, "move_eff": 0, "slack_score": slack_score,
-                "avg_pref": avg_pref, "avg_qual": 0}
+        return {"final_score": -1, "move_eff": 0, "avg_pref": avg_pref, "avg_qual": 0}
 
     avg_qual = sum(item.get("adjusted_qual", 0.5) for item in course.items) / n * 100 \
         if any("adjusted_qual" in item for item in course.items) else 50.0
 
     w = MACRO_WEIGHTS[mode]
     final_score = (
-        w["pref"] * avg_pref + w["qual"] * avg_qual
-        + w["move_eff"] * move_eff + w["slack"] * slack_score
+        w["pref"] * avg_pref + w["qual"] * avg_qual + w["move_eff"] * move_eff
     )
 
     return {
-        "final_score": final_score, "move_eff": move_eff, "slack_score": slack_score,
+        "final_score": final_score, "move_eff": move_eff,
         "avg_pref": avg_pref, "avg_qual": avg_qual,
     }
 

@@ -88,7 +88,8 @@ def calc_dwell_time(mode: str, pref: float, place) -> float:
     if mode == "dist":
         return stay_time
     if mode == "relax":
-        return stay_max if stay_max is not None else stay_time
+        base = stay_max if stay_max is not None else stay_time
+        return base + 30
     if mode == "pref":
         if stay_max is None:
             return stay_time
@@ -120,14 +121,11 @@ def calc_micro_score(
         mode: "dist"(동선효율) | "pref"(취향맞춤) | "relax"(여유여행)
     """
     if mode == "dist":
-        # 이동시간 제곱 페널티 — 근거리 장소를 강하게 선호
-        return 0.2 * pref + 0.3 * adjusted_qual - 0.5 * (cost_move ** 2)
+        return 0.2 * pref + 0.3 * adjusted_qual - 0.3 * cost_move
     elif mode == "pref":
-        # 취향·품질 우선, 이동 부담은 약하게만 반영
         return 0.5 * pref + 0.4 * adjusted_qual - 0.1 * cost_move
     elif mode == "relax":
-        # 이동+체류가 잔여시간에서 차지하는 비중이 크면 감점
-        time_ratio = (travel_min + stay_min) / remain_time_min if remain_time_min > 0 else 1.0
+        time_ratio = travel_min / remain_time_min if remain_time_min > 0 else 1.0
         return 0.3 * pref + 0.4 * adjusted_qual - 0.3 * time_ratio
     raise ValueError(f"알 수 없는 코스 모드: {mode}")
 
