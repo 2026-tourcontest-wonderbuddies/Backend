@@ -92,7 +92,7 @@ class RecommendedCourseSerializer(serializers.ModelSerializer):
     class Meta:
         model = RecommendedCourse
         fields = ["id", "mode", "is_selected", "final_score", "created_at",
-                  "trip_start_datetime", "trip_end_datetime", "days"]
+                  "trip_start_date", "trip_end_date", "days"]
 
 # 코스 요약
 class RecommendedCourseSummarySerializer(serializers.ModelSerializer):
