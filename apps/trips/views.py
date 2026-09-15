@@ -19,7 +19,7 @@ from apps.recommendation.engine import generate_all_courses
 from apps.recommendation.engine_provider import get_routing_engine
 from apps.nlp.modification_interpreter import parse_modification_request, generate_result_explanation
 from apps.recommendation.course_modifier import (
-    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment, recalc_first_item_travel
+    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment, recalc_first_and_last_item_travel
 )
 
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -101,7 +101,6 @@ class CourseLodgingOptionsView(APIView):
 
 # 선택된 숙소
 class CourseSelectLodgingView(APIView):
-    """★ 수정: lodging_id(Django PK) → content_id(accommodations 카드 식별자) 기반."""
     def post(self, request, course_id):
         course = get_object_or_404(RecommendedCourse, id=course_id)
         content_id = request.data.get("content_id")
@@ -124,7 +123,7 @@ class CourseSelectLodgingView(APIView):
         course.is_selected = True
         course.save(update_fields=["is_selected"])
 
-        recalc_first_item_travel(course) 
+        recalc_first_and_last_item_travel(course) 
 
         return Response({
             "course_id": course.id,

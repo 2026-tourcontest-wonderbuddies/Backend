@@ -37,55 +37,85 @@ def _travel_from_coords(lat:float, lon:float, place, transport_mode:str = "car")
     return (distance_km / avg_speed_kmh) * 60
 
 
-def recalc_first_item_travel(course) -> None:
+def recalc_first_and_last_item_travel(course) -> None:
     """
-    신규: 숙소 확정(select-lodging) 직후 호출.
-    Day1 첫 항목 = 제주공항 기준, Day2~N 첫 항목 = 확정된 숙소 기준으로
-    travel_min_from_prev를 재계산하고, 이후 항목들 시각도 같이 재계산한다.
+    ★ 확장: 숙소 확정(select-lodging) 직후 호출.
+    - 첫 항목: Day1=공항, Day2~N=숙소 기준 (기존 recalc_first_item_travel 로직)
+    - 마지막 항목 이후: Day1~N-1=숙소로 나가는 시간, DayN=공항으로 나가는 시간 (신규)
     """
     routing_engine = get_routing_engine()
     matrix_ids = set(routing_engine._pos.keys())
 
     days = list(course.days.order_by("day_index"))
+    total_days = len(days)
+
     for i, day in enumerate(days):
-        first_item = day.items.order_by("order").first()
-        if not first_item:
+        items = list(day.items.order_by("order"))
+        if not items:
             continue
 
+        first_item = items[0]
+        last_item = items[-1]
+
+        # ── 1. 첫 항목 이동시간 (기존 로직 그대로) ──
         if i == 0:
-            travel_min = estimate_airport_travel_min(
+            travel_min_in = estimate_airport_travel_min(
                 first_item.place.latitude, first_item.place.longitude, DEFAULT_VEHICLE
             )
         else:
             lodging = day.lodging_snapshot
-            if not lodging:
-                continue
-            lodging_content_id = lodging.get("content_id")
-            if lodging_content_id and lodging_content_id in matrix_ids and first_item.place.content_id in matrix_ids:
-                result = routing_engine.get_travel_time(lodging_content_id, first_item.place.content_id,
-                                                          mode="osrm", vehicle=DEFAULT_VEHICLE)
-                travel_min = result["duration_min_adjusted"]
+            if lodging:
+                lodging_content_id = lodging.get("content_id")
+                if lodging_content_id and lodging_content_id in matrix_ids and first_item.place.content_id in matrix_ids:
+                    result = routing_engine.get_travel_time(lodging_content_id, first_item.place.content_id,
+                                                              mode="osrm", vehicle=DEFAULT_VEHICLE)
+                    travel_min_in = result["duration_min_adjusted"]
+                else:
+                    travel_min_in = _travel_from_coords(lodging["lat"], lodging["lon"], first_item.place, DEFAULT_VEHICLE)
             else:
-                travel_min = _travel_from_coords(lodging["lat"], lodging["lon"], first_item.place, DEFAULT_VEHICLE)
+                travel_min_in = None
 
-        travel_min = snap_travel_time_5min(travel_min)
+        if travel_min_in is not None:
+            travel_min_in = snap_travel_time_5min(travel_min_in)
+            target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+            day_start = datetime(
+                target_date.year, target_date.month, target_date.day,
+                day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
+            )
+            arrive_at = day_start + timedelta(minutes=travel_min_in)
+            depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
 
-        # day 시작시각 기준으로 arrive_at/depart_at 직접 계산해서 확정
-        target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
-        day_start = datetime(
-            target_date.year, target_date.month, target_date.day,
-            day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
-        )
-        arrive_at = day_start + timedelta(minutes=travel_min)
-        depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
+            first_item.travel_min_from_prev = travel_min_in
+            first_item.arrive_at = arrive_at
+            first_item.depart_at = depart_at
+            first_item.save(update_fields=["travel_min_from_prev", "arrive_at", "depart_at"])
 
-        first_item.travel_min_from_prev = travel_min
-        first_item.arrive_at = arrive_at
-        first_item.depart_at = depart_at
-        first_item.save(update_fields=["travel_min_from_prev", "arrive_at", "depart_at"])
+            recalc_timeline_from(day, start_order=1)
+            last_item.refresh_from_db()   # ★ 재계산으로 마지막 항목 시각이 바뀌었을 수 있으니 다시 조회
 
-        # 0이 아니라 1부터 — 방금 확정한 첫 항목은 다시 안 건드리게 함
-        recalc_timeline_from(day, start_order=1)
+        # ── 2. 신규: 마지막 항목 → 숙소/공항 이동시간 ──
+        if i == total_days - 1:
+            # 마지막 날: 마지막 장소 → 공항
+            travel_min_out = estimate_airport_travel_min(
+                last_item.place.latitude, last_item.place.longitude, DEFAULT_VEHICLE
+            )
+        else:
+            # 그 외 날: 마지막 장소 → (오늘 밤 묵을) 숙소
+            lodging = day.lodging_snapshot
+            if not lodging:
+                travel_min_out = None
+            else:
+                lodging_content_id = lodging.get("content_id")
+                if lodging_content_id and lodging_content_id in matrix_ids and last_item.place.content_id in matrix_ids:
+                    result = routing_engine.get_travel_time(last_item.place.content_id, lodging_content_id,
+                                                              mode="osrm", vehicle=DEFAULT_VEHICLE)
+                    travel_min_out = result["duration_min_adjusted"]
+                else:
+                    travel_min_out = _travel_from_coords(lodging["lat"], lodging["lon"], last_item.place, DEFAULT_VEHICLE)
+
+        if travel_min_out is not None:
+            day.travel_to_next_min = snap_travel_time_5min(travel_min_out)
+            day.save(update_fields=["travel_to_next_min"])
 
 # 장소 그대로, 시간만 순서대로 다시 채우기
 def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:

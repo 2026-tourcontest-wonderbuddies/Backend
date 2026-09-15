@@ -129,6 +129,9 @@ class ItineraryDay(models.Model):
     # 그날 활동 시작 시간
     avail_start_min = models.IntegerField(default=540)
 
+    # 그날 마지막 장소에서 숙소/공항까지 이동시간(분)
+    travel_to_next_min = models.IntegerField(null=True, blank=True,)
+
     class Meta:
         ordering = ["day_index"]
         unique_together = ("course", "day_index")
