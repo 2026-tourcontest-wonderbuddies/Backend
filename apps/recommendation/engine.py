@@ -39,6 +39,26 @@ def _split_evenly(total: int, n_parts: int) -> list[int]:
     return [base + (1 if i < remainder else 0) for i in range(n_parts)]
 
 
+def _split_by_time_ratio(total: int, segment_minutes: list[int]) -> list[int]:
+    """
+    total(관광지 목표 개수)을 각 구간의 실제 시간 길이 비율로 분배.
+    구간이 길수록 더 많이, 짧을수록 더 적게 배정된다.
+    실제 채워지는 개수는 뒤이은 beam_search_day의 시간예산 체크가 다시 검증한다.
+    """
+    total_minutes = sum(segment_minutes)
+    if total_minutes <= 0 or total <= 0:
+        return [0] * len(segment_minutes)
+
+    raw = [total * (m / total_minutes) for m in segment_minutes]
+    result = [int(r) for r in raw]  # 내림
+    remainder = total - sum(result)
+
+    order_by_frac = sorted(range(len(raw)), key=lambda i: raw[i] - result[i], reverse=True)
+    for i in range(remainder):
+        result[order_by_frac[i % len(order_by_frac)]] += 1
+    return result
+
+
 def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk_target, mode,
                         purpose_main, purpose_sub, exclude_categories,
                         region_quadrant, visit_start_dt, get_travel_time_fn, get_stay_time_fn,
@@ -124,8 +144,9 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 tour_segments.append((seg_start, seg_end))
 
         # 여기는 기존 방식 유지 (시간비율 아님, 균등분배 그대로)
-        general_chunk_targets = _split_evenly(general_target, len(tour_segments)) if tour_segments else []
-
+        segment_minutes = [end - start for start, end in tour_segments]   # ★ 각 구간의 실제 길이(분) 계산
+        general_chunk_targets = _split_by_time_ratio(general_target, segment_minutes) if tour_segments else []
+        
         # 이벤트 목록 조립: tour/meal 시간순 교차
         events = []
         tour_i = 0
