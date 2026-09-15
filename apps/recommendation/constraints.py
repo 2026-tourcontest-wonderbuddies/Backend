@@ -131,6 +131,12 @@ def calc_target_slots(avail_hours: float, mode: str, need_night_spot: bool = Fal
         slots += 1
     return max(slots, 0)
 
+def snap_travel_time_5min(minutes: float) -> int:
+    """
+    이동시간 5분 단위 정규화 (내림 방식).
+    1~4분 → 0분, 5~9분 → 5분, 10~14분 → 10분 ...
+    """
+    return int(minutes // 5) * 5
 
 def snap_to_15min(minutes: float) -> int:
     snapped = round(minutes / STAY_GRID_MIN) * STAY_GRID_MIN

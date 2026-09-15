@@ -19,7 +19,7 @@ from apps.recommendation.engine import generate_all_courses
 from apps.recommendation.engine_provider import get_routing_engine
 from apps.nlp.modification_interpreter import parse_modification_request, generate_result_explanation
 from apps.recommendation.course_modifier import (
-    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment,
+    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment, recalc_first_item_travel
 )
 
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -123,6 +123,8 @@ class CourseSelectLodgingView(APIView):
         RecommendedCourse.objects.filter(trip=course.trip).update(is_selected=False)
         course.is_selected = True
         course.save(update_fields=["is_selected"])
+
+        recalc_first_item_travel(course) 
 
         return Response({
             "course_id": course.id,

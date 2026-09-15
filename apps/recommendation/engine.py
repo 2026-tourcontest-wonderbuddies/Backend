@@ -6,6 +6,7 @@ from apps.places.models import Place
 from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, ItineraryItem
 from apps.recommendation.constraints import (
     calc_avail_hours_from_schedule, calc_target_slots, estimate_airport_travel_min,
+    snap_travel_time_5min,
 )
 from apps.recommendation.course_builder import beam_search_day, select_best_course, calc_macro_score
 from apps.recommendation.food_scoring import build_meal_candidates, decide_food_slot_types, score_food_candidates
@@ -147,13 +148,14 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             )
             if best_chunk:
                 for item in best_chunk.items:
-                    current_time += timedelta(minutes=item["travel_min"])
+                    travel_min = snap_travel_time_5min(item["travel_min"])
+                    current_time += timedelta(minutes=travel_min)
                     arrive = current_time
                     current_time += timedelta(minutes=item["stay_min"])
                     depart = current_time
                     ItineraryItem.objects.create(
                         day=day_obj, order=order, place=item["place"], slot_type="GENERAL",
-                        arrive_at=arrive, depart_at=depart, travel_min_from_prev=item["travel_min"],
+                        arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
                         hours_uncertain=item.get("hours_uncertain", False),
                     )
                     visited_across_days.add(item["place"].content_id)
@@ -176,13 +178,14 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                     ranked = [r for r in ranked if r["travel_min"] + r["stay_min"] <= remain_time]
                     if ranked:
                         chosen = ranked[0]
-                        current_time += timedelta(minutes=chosen["travel_min"])
+                        travel_min = snap_travel_time_5min(chosen["travel_min"])
+                        current_time += timedelta(travel_min)
                         arrive = current_time
                         current_time += timedelta(minutes=chosen["stay_min"])
                         depart = current_time
                         ItineraryItem.objects.create(
                             day=day_obj, order=order, place=chosen["place"], slot_type=slot_type,
-                            arrive_at=arrive, depart_at=depart, travel_min_from_prev=chosen["travel_min"],
+                            arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
                             is_relaxed_preference=chosen.get("is_relaxed", False),
                         )
                         visited_across_days.add(chosen["place"].content_id)
@@ -208,13 +211,14 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             if not ranked:
                 continue
             chosen = ranked[0]
-            current_time += timedelta(minutes=chosen["travel_min"])
+            travel_min = snap_travel_time_5min(chosen["travel_min"])
+            current_time += timedelta(travel_min)
             arrive = current_time
             current_time += timedelta(minutes=chosen["stay_min"])
             depart = current_time
             ItineraryItem.objects.create(
                 day=day_obj, order=order, place=chosen["place"], slot_type=slot_type,
-                arrive_at=arrive, depart_at=depart, travel_min_from_prev=chosen["travel_min"],
+                arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
                 is_relaxed_preference=chosen.get("is_relaxed", False),
             )
             visited_across_days.add(chosen["place"].content_id)
