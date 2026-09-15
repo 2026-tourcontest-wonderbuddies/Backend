@@ -30,7 +30,7 @@ TARGET_SLACK = {"dist": 0.05, "pref": 0.10, "relax": 0.20}
 MACRO_WEIGHTS = {
     "dist":  {"pref": 0.20, "qual": 0.10, "move_eff": 0.60, "slack": 0.10},
     "pref":  {"pref": 0.60, "qual": 0.20, "move_eff": 0.15, "slack": 0.05},
-    "relax": {"pref": 0.25, "qual": 0.15, "move_eff": 0.20, "slack": 0.40},
+    "relax": {"pref": 0.35, "qual": 0.20, "move_eff": 0.25, "slack": 0.20},
 }
 
 

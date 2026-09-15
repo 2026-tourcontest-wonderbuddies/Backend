@@ -12,8 +12,8 @@
 """
 from __future__ import annotations
 from apps.places.models import Place
-from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score
-from apps.recommendation.constraints import estimate_airport_travel_min
+from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score, calc_dwell_time
+from apps.recommendation.constraints import estimate_airport_travel_min, floor_to_15min
 
 MEAL_CAPABLE_ROLES = ("RESTAURANT", "SNACK")   # ★ 변경: 기존 RESTAURANT만 → SNACK 추가
 SOFT_FILTER_MIN_MEAL_CANDIDATES = 5
@@ -176,7 +176,8 @@ def score_food_candidates(
     nlp_scores에서 이 장소의 QueryFit조회 -> calc_pref_food()로 최종 결합
     relaxed_ids도 실제로 감점에 반영
     """
-    from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score
+    from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score, calc_dwell_time
+    from apps.recommendation.constraints import floor_to_15min
 
     relaxed_ids = relaxed_ids or set()
     nlp_scores = nlp_scores or {}
@@ -189,8 +190,6 @@ def score_food_candidates(
         else:
             travel_min = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)
 
-        stay_min = place.stay_time_minutes
-
         # PurposeFit: 목적 태그 매칭 + 시너지 보너스
         match_main = get_purpose_match(place, purpose_main) * 100
         match_sub = get_purpose_match(place, purpose_sub) * 100 if purpose_sub else 0.0
@@ -199,8 +198,14 @@ def score_food_candidates(
         # QueryFit: free_text_input 임베딩 유사도. nlp_matching.py가 만든 0~1 값을 0~100으로 스케일
         raw_nlp = nlp_scores.get(place.content_id)
         query_fit = raw_nlp * 100 if raw_nlp is not None else None
-        
+
         pref = calc_pref_food(purpose_fit, query_fit)
+
+        stay_min = calc_dwell_time(mode, pref, place)
+        if remain_time_min > 0:
+            available = max(remain_time_min - travel_min, 0)
+            if stay_min > available:
+                stay_min = floor_to_15min(available)
 
         # 3. 품질 및 이동 비용 계산
         adjusted_qual = get_adjusted_qual(place)

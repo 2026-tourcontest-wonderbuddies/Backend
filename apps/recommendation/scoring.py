@@ -13,6 +13,8 @@ Pipeline 5.2~5.3 — Micro 평가 (단일 장소 스코어링).
 """
 from __future__ import annotations
 
+from apps.recommendation.constraints import snap_to_15min, floor_to_15min
+
 MAIN_PURPOSE_THRESHOLD = 0.40
 SYNERGY_BONUS_WEIGHT = 0.20
 DYNAMIC_SWAP_TRIGGER = 0.80
@@ -79,6 +81,21 @@ def get_adjusted_qual(place) -> float:
     return place.satisfaction_score
 
 
+def calc_dwell_time(mode: str, pref: float, place) -> float:
+    stay_time = place.stay_time_minutes or 0
+    stay_max = place.stay_max
+
+    if mode == "dist":
+        return stay_time
+    if mode == "relax":
+        return stay_max if stay_max is not None else stay_time
+    if mode == "pref":
+        if stay_max is None:
+            return stay_time
+        return snap_to_15min(stay_time + (stay_max - stay_time) * pref)
+    raise ValueError(f"알 수 없는 코스 모드: {mode}")
+
+
 def calc_cost_move(travel_min: float) -> float:
     """
     Pipeline 5.2-③ CostMove_R,k = TravelTime / 30 (30분을 비용 1.0으로 환산).
@@ -135,9 +152,15 @@ def score_candidate(
     """
     place = candidate["place"]
     travel_min = candidate["travel_min"]
-    stay_min = candidate["stay_min"]
 
     pref = calc_pref(place, purpose_main, purpose_sub, nlp_match_score)
+
+    stay_min = calc_dwell_time(mode, pref, place)
+    if remain_time_min > 0:
+        available = max(remain_time_min - travel_min, 0)
+        if stay_min > available:
+            stay_min = floor_to_15min(available)
+
     adjusted_qual = get_adjusted_qual(place)
     cost_move = calc_cost_move(travel_min)
     micro_score = calc_micro_score(
@@ -146,6 +169,7 @@ def score_candidate(
 
     return {
         **candidate,
+        "stay_min": stay_min,
         "pref": pref,
         "adjusted_qual": adjusted_qual,
         "cost_move": cost_move,

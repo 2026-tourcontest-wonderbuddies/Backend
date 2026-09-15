@@ -143,6 +143,10 @@ def snap_to_15min(minutes: float) -> int:
     return max(int(snapped), STAY_GRID_MIN)
 
 
+def floor_to_15min(minutes: float) -> int:
+    return max(int(minutes // STAY_GRID_MIN) * STAY_GRID_MIN, 0)
+
+
 def classify_quadrant(latitude: float, longitude: float) -> str:
     is_north = latitude >= HALLASAN_LAT
     is_east = longitude >= HALLASAN_LNG
