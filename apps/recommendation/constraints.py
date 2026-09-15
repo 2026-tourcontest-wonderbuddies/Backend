@@ -122,6 +122,10 @@ def snap_to_15min(minutes: float) -> int:
     return max(int(snapped), STAY_GRID_MIN)
 
 
+def floor_to_15min(minutes: float) -> int:
+    return max(int(minutes // STAY_GRID_MIN) * STAY_GRID_MIN, 0)
+
+
 def snap_travel_time_5min(minutes: float) -> int:
     """1~4분→0, 5~9분→5 ... (내림)"""
     return int(minutes // 5) * 5
