@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lodging_data import Lodging, parse_check_time
-from lodging_filter import TripContext
+from accommodations.lodging_data import Lodging, parse_check_time
+from accommodations.lodging_filter import TripContext
 
 # 설계서 3.1 기본 타임라인 앵커.
 DAY_START = "09:00"
