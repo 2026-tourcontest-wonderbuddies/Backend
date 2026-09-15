@@ -38,11 +38,6 @@ def _travel_from_coords(lat:float, lon:float, place, transport_mode:str = "car")
 
 
 def recalc_first_and_last_item_travel(course) -> None:
-    """
-    ★ 확장: 숙소 확정(select-lodging) 직후 호출.
-    - 첫 항목: Day1=공항, Day2~N=숙소 기준 (기존 recalc_first_item_travel 로직)
-    - 마지막 항목 이후: Day1~N-1=숙소로 나가는 시간, DayN=공항으로 나가는 시간 (신규)
-    """
     routing_engine = get_routing_engine()
     matrix_ids = set(routing_engine._pos.keys())
 
@@ -57,13 +52,15 @@ def recalc_first_and_last_item_travel(course) -> None:
         first_item = items[0]
         last_item = items[-1]
 
-        # ── 1. 첫 항목 이동시간 (기존 로직 그대로) ──
+        # ── 1. 첫 항목 이동시간 ──
         if i == 0:
             travel_min_in = estimate_airport_travel_min(
                 first_item.place.latitude, first_item.place.longitude, DEFAULT_VEHICLE
             )
         else:
-            lodging = day.lodging_snapshot
+            # ★ 수정: 그날 자신의 lodging_snapshot이 아니라, "전날" 숙소를 참조
+            prev_day = days[i - 1]
+            lodging = prev_day.lodging_snapshot   # ★ day → prev_day로 변경!
             if lodging:
                 lodging_content_id = lodging.get("content_id")
                 if lodging_content_id and lodging_content_id in matrix_ids and first_item.place.content_id in matrix_ids:
@@ -91,17 +88,15 @@ def recalc_first_and_last_item_travel(course) -> None:
             first_item.save(update_fields=["travel_min_from_prev", "arrive_at", "depart_at"])
 
             recalc_timeline_from(day, start_order=1)
-            last_item.refresh_from_db()   # ★ 재계산으로 마지막 항목 시각이 바뀌었을 수 있으니 다시 조회
+            last_item.refresh_from_db()
 
-        # ── 2. 신규: 마지막 항목 → 숙소/공항 이동시간 ──
+        # ── 2. 마지막 항목 → 숙소/공항 (이건 원래도 맞았음, day.lodging_snapshot이 "오늘 밤 묵을 곳"이 맞으니까) ──
         if i == total_days - 1:
-            # 마지막 날: 마지막 장소 → 공항
             travel_min_out = estimate_airport_travel_min(
                 last_item.place.latitude, last_item.place.longitude, DEFAULT_VEHICLE
             )
         else:
-            # 그 외 날: 마지막 장소 → (오늘 밤 묵을) 숙소
-            lodging = day.lodging_snapshot
+            lodging = day.lodging_snapshot   # 이건 그대로 맞음 (오늘 밤 묵을 숙소)
             if not lodging:
                 travel_min_out = None
             else:
