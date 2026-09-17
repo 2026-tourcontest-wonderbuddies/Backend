@@ -128,7 +128,13 @@ def floor_to_15min(minutes: float) -> int:
 
 
 def snap_travel_time_5min(minutes: float) -> int:
-    """1~4분→0, 5~9분→5 ... (내림)"""
+    """
+    이동시간 5분 단위 정규화.
+    0~4분 → 5분(올림, 최소 이동시간 보장)
+    5분 이상 → 5분 단위 내림 (5~9분→5, 10~14분→10 ...)
+    """
+    if minutes < 5:
+        return 5
     return int(minutes // 5) * 5
 
 
