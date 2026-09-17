@@ -84,11 +84,22 @@ def recalc_first_and_last_item_travel(course) -> None:
 
         if travel_min_in is not None:
             travel_min_in = snap_travel_time_5min(travel_min_in)
-            target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
-            day_start = datetime(
-                target_date.year, target_date.month, target_date.day,
-                day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
-            )
+
+            # 식사 슬롯 시간이면 원래 depart_at-arrvie_at 유지
+            # stay_time_minutes로 계산x - engine.py가 설정한 식사 시간대 폭으로 고정
+            if first_item.slot_type == "RESTAURANT":
+                original_duration = first_item.depart_at - first_item.arrive_at
+                arrive_at = first_item.arrive_at  # 식사는 시간대 시작에 이미 고정되어 있으므로 arrive_at 자체를 안 건드림
+                depart_at = arrive_at + original_duration
+            else:
+                target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+                day_start = datetime(
+                    target_date.year, target_date.month, target_date.day,
+                    day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
+                )
+                arrive_at = day_start + timedelta(minutes=travel_min_in)
+                depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
+            
             arrive_at = day_start + timedelta(minutes=travel_min_in)
             depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
 
@@ -143,6 +154,7 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
     routing_engine = get_routing_engine()
     get_travel_time_fn = _get_travel_time_fn(routing_engine)
     matrix_ids = set(routing_engine._pos.keys())
+    airport_available = JEJU_AIRPORT_PROXY_CONTENT_ID in matrix_ids
 
     items = list(day.items.order_by("order"))
     if start_order >= len(items):
@@ -155,29 +167,56 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
             day.avail_start_min // 60, day.avail_start_min % 60,
             tzinfo=KST,
         )
-        prev_place = None
+
+        # Day1이면 공항 기준(prev_place=None)유지
+        # Day2-N-1이면 전날 숙소를 전날 숙소를 가상의 출발점으로 사용
+        if day.day_index == 1:
+            prev_place = None
+            prev_lodging = None
+        else:
+            prev_day = day.course.days.filter(day_index=day.day_index - 1).first()
+            prev_place = None  # Place 객체가 아니라 좌표만 있으므로 None 유지하되, 아래서 좌표를 따로 씀
+            prev_lodging = prev_day.lodging_snapshot if prev_day else None
     else:
         current_time = items[start_order - 1].depart_at.astimezone(KST)
         prev_place = items[start_order - 1].place
+        prev_lodging = None
 
     day_end_min = day.avail_start_min + int(day.avail_hours * 60)
 
-    for item in items[start_order:]:
+    for idx, item in enumerate(items[start_order:]):
+        is_first_in_range = (idx == 0)
+
         if prev_place is not None and prev_place.content_id in matrix_ids and item.place.content_id in matrix_ids:
             travel_result = get_travel_time_fn(prev_place.content_id, item.place.content_id)
             travel_min = travel_result["duration_min_adjusted"]
+        elif is_first_in_range and start_order == 0 and day.day_index > 1 and prev_lodging:
+            # Day2+ 첫 항목은 전날 숙소 좌표 기준으로 계산
+            lodging_content_id = prev_lodging.get("content_id")
+            if lodging_content_id and lodging_content_id in matrix_ids and item.place.content_id in matrix_ids:
+                travel_result = get_travel_time_fn(lodging_content_id, item.place.content_id)
+                travel_min = travel_result["duration_min_adjusted"]
+            else:
+                travel_min = _travel_from_coords(prev_lodging["lat"], prev_lodging["lon"], item.place, DEFAULT_VEHICLE)
         else:
             travel_min = estimate_airport_travel_min(item.place.latitude, item.place.longitude, DEFAULT_VEHICLE)
 
-        travel_min = snap_travel_time_5min(travel_min)   # ★ 5분 정규화 적용
+        travel_min = snap_travel_time_5min(travel_min)
 
-        current_time += timedelta(minutes=travel_min)
-        item.arrive_at = current_time
-        item.travel_min_from_prev = travel_min
-
-        current_time += timedelta(minutes=item.place.stay_time_minutes)
-        item.depart_at = current_time
-        item.save(update_fields=["arrive_at", "depart_at", "travel_min_from_prev"])
+        # 식사 슬롯이면 시간대 고정 유지, 관광지면 기존처럼 순차 계산
+        if item.slot_type == "RESTAURANT":
+            original_duration = item.depart_at - item.arrive_at
+            # 이동시간은 갱신하되, 시각은 시간대 고정 유지 (arrive_at은 그대로 둠)
+            item.travel_min_from_prev = travel_min
+            item.save(update_fields=["travel_min_from_prev"])
+            current_time = item.depart_at  # 다음 항목 계산을 위해 시간만 이어받음
+        else:
+            current_time += timedelta(minutes=travel_min)
+            item.arrive_at = current_time
+            item.travel_min_from_prev = travel_min
+            current_time += timedelta(minutes=item.place.stay_time_minutes)
+            item.depart_at = current_time
+            item.save(update_fields=["arrive_at", "depart_at", "travel_min_from_prev"])
 
         prev_place = item.place
 
@@ -195,7 +234,7 @@ def resequence_orders(day: ItineraryDay) -> None:
             item.save(update_fields=["order"])
 
 
-# ── ② 무거운 재계산: 고정 안 된 구간만 빔서치로 장소 자체를 다시 고름 ──────
+# 무거운 재계산: 고정 안 된 구간만 빔서치로 장소 자체를 다시 고름
 
 def regenerate_unlocked_segment(day: ItineraryDay, purpose_main: str, purpose_sub: str,
                                  mode: str, extra_exclude_ids: set[str] = None) -> None:
