@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     'apps.recommendation',
     'apps.nlp',
     'apps.routing',
+    'apps.curated',
 ]
 
 MIDDLEWARE = [
