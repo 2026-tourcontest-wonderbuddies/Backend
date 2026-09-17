@@ -76,7 +76,8 @@ class ItineraryDaySerializer(serializers.ModelSerializer):
         model = ItineraryDay
         fields = ["id", "day_index", "day_case", "avail_hours", "target_slots",
                 "need_morning", "need_lunch", "need_dinner", "need_night_spot", 
-                "lodging", "travel_to_next_min", "items"]
+                "travel_to_next_min", "airport_to_first_travel_min", 
+                "lodging", "items"]
 
     # 필요한 숙소 정보만 같이 보내기 
     def get_lodging(self, obj):

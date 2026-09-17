@@ -129,6 +129,9 @@ class ItineraryDay(models.Model):
     # 그날 활동 시작 시간
     avail_start_min = models.IntegerField(default=540)
 
+    # 입도일(day1에 한해), 공항에서 첫날 장소까지 이동시간
+    airport_to_first_travel_min = models.IntegerField(null=True, blank=True)
+
     # 그날 마지막 장소에서 숙소/공항까지 이동시간(분)
     travel_to_next_min = models.IntegerField(null=True, blank=True,)
 

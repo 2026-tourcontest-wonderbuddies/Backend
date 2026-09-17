@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from apps.trips.models import ItineraryDay, ItineraryItem
 from apps.recommendation.course_builder import beam_search_day, select_best_course
 from apps.recommendation.engine_provider import get_routing_engine
-from apps.recommendation.constraints import estimate_airport_travel_min, snap_travel_time_5min
+from apps.recommendation.constraints import estimate_airport_travel_min, snap_travel_time_5min, JEJU_AIRPORT_PROXY_CONTENT_ID
 
 KST = ZoneInfo("Asia/Seoul")
 DEFAULT_VEHICLE = "car"
@@ -40,6 +40,7 @@ def _travel_from_coords(lat:float, lon:float, place, transport_mode:str = "car")
 def recalc_first_and_last_item_travel(course) -> None:
     routing_engine = get_routing_engine()
     matrix_ids = set(routing_engine._pos.keys())
+    airport_available = JEJU_AIRPORT_PROXY_CONTENT_ID in matrix_ids
 
     days = list(course.days.order_by("day_index"))
     total_days = len(days)
@@ -52,15 +53,24 @@ def recalc_first_and_last_item_travel(course) -> None:
         first_item = items[0]
         last_item = items[-1]
 
-        # ── 1. 첫 항목 이동시간 ──
+        # 첫 항목 이동시간
         if i == 0:
-            travel_min_in = estimate_airport_travel_min(
-                first_item.place.latitude, first_item.place.longitude, DEFAULT_VEHICLE
-            )
+            if airport_available and first_item.place.content_id in matrix_ids:
+                # 매트릭스에 있으면 OSRM 실측값 사용
+                result = routing_engine.get_travel_time(
+                    JEJU_AIRPORT_PROXY_CONTENT_ID, first_item.place.content_id,
+                    mode="osrm", vehicle=DEFAULT_VEHICLE
+                )
+                travel_min_in = result["duration_min_adjusted"]
+            else:
+                # 없으면 제주공항으로 부터 직선거리라도...
+                travel_min_in = estimate_airport_travel_min(
+                    first_item.place.latitude, first_item.place.longitude, DEFAULT_VEHICLE
+                )
         else:
-            # ★ 수정: 그날 자신의 lodging_snapshot이 아니라, "전날" 숙소를 참조
+            # 그날 자신의 lodging_snapshot이 아니라, "전날" 숙소를 참조
             prev_day = days[i - 1]
-            lodging = prev_day.lodging_snapshot   # ★ day → prev_day로 변경!
+            lodging = prev_day.lodging_snapshot
             if lodging:
                 lodging_content_id = lodging.get("content_id")
                 if lodging_content_id and lodging_content_id in matrix_ids and first_item.place.content_id in matrix_ids:
@@ -90,11 +100,23 @@ def recalc_first_and_last_item_travel(course) -> None:
             recalc_timeline_from(day, start_order=1)
             last_item.refresh_from_db()
 
-        # ── 2. 마지막 항목 → 숙소/공항 (이건 원래도 맞았음, day.lodging_snapshot이 "오늘 밤 묵을 곳"이 맞으니까) ──
+            if i == 0:
+                day.airport_to_first_travel_min = travel_min_in
+                day.save(update_fields=["airport_to_first_travel_min"])
+
+        # 2. 마지막 항목 → 숙소/공항 
         if i == total_days - 1:
-            travel_min_out = estimate_airport_travel_min(
-                last_item.place.latitude, last_item.place.longitude, DEFAULT_VEHICLE
-            )
+            if airport_available and last_item.place.content_id in matrix_ids:
+                # OSRM 실측값 사용
+                result = routing_engine.get_travel_time(
+                    last_item.place.content_id, JEJU_AIRPORT_PROXY_CONTENT_ID,
+                    mode="osrm", vehicle=DEFAULT_VEHICLE
+                )
+                travel_min_out = result["duration_min_adjusted"]
+            else:
+                travel_min_out = estimate_airport_travel_min(
+                    last_item.place.latitude, last_item.place.longitude, DEFAULT_VEHICLE
+                )
         else:
             lodging = day.lodging_snapshot   # 이건 그대로 맞음 (오늘 밤 묵을 숙소)
             if not lodging:
