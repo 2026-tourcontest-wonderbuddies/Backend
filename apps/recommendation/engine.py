@@ -8,18 +8,22 @@ from apps.recommendation.constraints import (
     calc_avail_hours_from_schedule, calc_target_slots, estimate_airport_travel_min,
     snap_travel_time_5min, get_meal_windows
 )
-from apps.recommendation.course_builder import beam_search_day, select_best_course, calc_macro_score
+from apps.recommendation.course_builder import (
+    beam_search_day, select_best_course, calc_macro_score, POPULAR_QUOTA_RATIO,
+)
 from apps.recommendation.food_scoring import build_meal_candidates, decide_food_slot_types, score_food_candidates
 from apps.recommendation.lodging_adapter import get_lodging_anchor
 from apps.recommendation.nlp_matching import calc_nlp_match_scores
 from apps.recommendation.filters import is_open_at
+from apps.recommendation.scoring import is_popular_place
+import math
 import time
 
 KST = ZoneInfo("Asia/Seoul")
 MODES = ["dist", "pref", "relax"]
 DEFAULT_VEHICLE = "car"
 
-MORNING_TARGET_MIN = 8 * 60 
+MORNING_TARGET_MIN = 8 * 60
 LUNCH_TARGET_MIN = 12 * 60
 DINNER_TARGET_MIN = 19 * 60
 
@@ -65,7 +69,7 @@ def _split_by_time_ratio(total: int, segment_minutes: list[int]) -> list[int]:
 def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk_target, mode,
                         purpose_main, purpose_sub, exclude_categories,
                         region_quadrant, visit_start_dt, get_travel_time_fn, get_stay_time_fn,
-                        visited_across_days, nlp_scores):
+                        visited_across_days, nlp_scores, popular_quota=0):
     if chunk_target <= 0 or chunk_avail_hours <= 0:
         return None
     courses = beam_search_day(
@@ -77,6 +81,7 @@ def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk
         visit_start_datetime=visit_start_dt,
         get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
         need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
+        popular_quota=popular_quota,
     )
     return select_best_course(courses, chunk_avail_hours, mode)
 
@@ -85,6 +90,63 @@ def _combine_date_and_time(base_date, day_index: int, time_str: str) -> datetime
     target_date = base_date + timedelta(days=day_index - 1)
     hour, minute = map(int, time_str.split(":"))
     return datetime(target_date.year, target_date.month, target_date.day, hour, minute, tzinfo=KST)
+
+
+def _replay_day_timeline(day_obj, get_travel_time_fn) -> None:
+    """
+    인기 맛집 교체로 바뀐 장소 기준으로 이동시간·도착/출발 시각을 하루 처음부터 다시 흘려보낸다.
+
+    RESTAURANT 슬롯은 시간대가 고정이라 도착/출발 시각 자체는 절대 안 바뀐다(그 지점에서
+    drift가 리셋됨) — travel_min_from_prev만 다시 계산한다. GENERAL 슬롯은 원래 체류시간
+    (depart-arrive)은 그대로 유지한 채, 직전 아이템 출발시각 + 새 이동시간으로 도착시각을
+    다시 계산해서 이어붙인다. 그래서 실제로 값이 밀리는 범위는 "교체 지점부터 다음 식사
+    전까지"로 자연히 국한된다.
+    """
+    items = list(day_obj.items.select_related("place").defer("place__embedding_vector").order_by("order"))
+    if not items:
+        return
+
+    # 하루의 첫 아이템이 GENERAL이면, 그 기준 출발시각(세그먼트 시작)은 장소가 바뀌어도
+    # 변하지 않는 값이므로 현재 저장된 값에서 역산해 앵커로 재사용한다.
+    first = items[0]
+    day_anchor = (
+        first.arrive_at - timedelta(minutes=first.travel_min_from_prev)
+        if first.slot_type == "GENERAL" else None
+    )
+
+    prev_place_id = None
+    current_time = None
+    updates = []
+
+    for item in items:
+        if prev_place_id is None:
+            travel_min = snap_travel_time_5min(
+                estimate_airport_travel_min(item.place.latitude, item.place.longitude, DEFAULT_VEHICLE)
+            )
+        else:
+            travel_min = snap_travel_time_5min(
+                get_travel_time_fn(prev_place_id, item.place_id)["duration_min_adjusted"]
+            )
+
+        if item.slot_type == "RESTAURANT":
+            new_arrive, new_depart = item.arrive_at, item.depart_at   # 시간대 고정 — 안 바뀜
+        else:
+            stay_duration = item.depart_at - item.arrive_at   # 원래 체류시간은 유지
+            base_time = current_time if current_time is not None else day_anchor
+            new_arrive = base_time + timedelta(minutes=travel_min)
+            new_depart = new_arrive + stay_duration
+
+        if (item.travel_min_from_prev, item.arrive_at, item.depart_at) != (travel_min, new_arrive, new_depart):
+            item.travel_min_from_prev = travel_min
+            item.arrive_at = new_arrive
+            item.depart_at = new_depart
+            updates.append(item)
+
+        current_time = new_depart
+        prev_place_id = item.place_id
+
+    if updates:
+        ItineraryItem.objects.bulk_update(updates, ["travel_min_from_prev", "arrive_at", "depart_at"])
 
 
 def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedCourse]:
@@ -97,7 +159,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     nlp_scores = calc_nlp_match_scores(trip.free_text_input)
     with open("debug_log.txt", "a") as f:
         f.write(f"[{mode}] nlp_scores 계산: {time.time()-t_start:.2f}초\n")
-    
+
     day_schedules = sorted(trip.day_schedules, key=lambda d: d["day_index"])
     total_days = len(day_schedules)
 
@@ -160,17 +222,31 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             if seg_end > seg_start:
                 tour_segments.append((seg_start, seg_end))
 
-        # 여기는 기존 방식 유지 (시간비율 아님, 균등분배 그대로)
         segment_minutes = [end - start for start, end in tour_segments]   # ★ 각 구간의 실제 길이(분) 계산
         general_chunk_targets = _split_by_time_ratio(general_target, segment_minutes) if tour_segments else []
-        
+
+        # 인기 장소 쿼터: 일자별 동적 슬롯수(target_slots)의 20~30%(기본 25%)를
+        # 일반(관광지) 슬롯 안에서 강제 확보한다. 구간 배분은 관광 목표 개수와 동일하게
+        # 시간 비율로 나누고, 각 구간의 실제 목표 개수를 넘지 않도록 캡을 건다.
+        popular_quota_total = min(round(target_slots * POPULAR_QUOTA_RATIO), general_target)
+        general_popular_quotas = _split_by_time_ratio(popular_quota_total, segment_minutes) if tour_segments else []
+        general_popular_quotas = [min(q, t) for q, t in zip(general_popular_quotas, general_chunk_targets)]
+
+        # 음식 슬롯도 동일한 방식으로 인기 맛집 쿼터 적용 (일자별 식사 슬롯 수의 25%).
+        # round()면 식사가 1~2개인 흔한 케이스가 전부 0으로 내림돼 쿼터가 무력화되므로,
+        # 식사가 1개 이상이면 최소 1곳은 보장되도록 ceil(올림) 사용 — 팀 합의 사항.
+        food_popular_quota = math.ceil(meal_count * POPULAR_QUOTA_RATIO)
+
         # 이벤트 목록 조립: tour/meal 시간순 교차
         events = []
         tour_i = 0
         for i in range(0, len(boundaries) - 1, 2):
             seg_start, seg_end = boundaries[i], boundaries[i + 1]
             if seg_end > seg_start:
-                events.append(("tour", seg_start, seg_end, general_chunk_targets[tour_i]))
+                events.append((
+                    "tour", seg_start, seg_end,
+                    general_chunk_targets[tour_i], general_popular_quotas[tour_i],
+                ))
                 tour_i += 1
             meal_idx = i // 2
             if meal_idx < len(meal_segments):
@@ -193,10 +269,11 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
 
         current_place = current_start_place
         order = 0
-        
+        day_meal_records = []   # 인기 맛집 재조정용 — 하루치 식사 선택 기록 (아래 for 루프 끝난 뒤 처리)
+
         for event in events:
             if event[0] == "tour":
-                _, seg_start, seg_end, chunk_target = event
+                _, seg_start, seg_end, chunk_target, chunk_popular_quota = event
                 seg_start_dt = day_start_kst.replace(hour=seg_start // 60, minute=seg_start % 60)
                 chunk_avail_hours = max(0.0, (seg_end - seg_start) / 60)
 
@@ -204,7 +281,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                     all_general_places, current_place, chunk_avail_hours, chunk_target, mode,
                     day_purpose_main, day_purpose_sub, day_exclude,
                     quadrant, seg_start_dt, get_travel_time_fn, get_stay_time_fn,
-                    visited_across_days, nlp_scores,
+                    visited_across_days, nlp_scores, popular_quota=chunk_popular_quota,
                 )
                 current_time = seg_start_dt
                 if best_chunk:
@@ -240,6 +317,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 if not role_candidates:
                     continue
 
+                prev_place = current_place   # 재조정 시 이동시간 재계산 기준점으로 기록해둠
                 if order == 0 or current_place is None:
                     chosen_place = role_candidates[0]
                     travel_min = snap_travel_time_5min(
@@ -262,14 +340,65 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 arrive = meal_start_dt   # ★ 이동시간과 무관하게 시간대 시작에 정확히 고정
                 depart = meal_start_dt + timedelta(minutes=slot_duration_min)
 
-                ItineraryItem.objects.create(
+                meal_item = ItineraryItem.objects.create(
                     day=day_obj, order=order, place=chosen_place, slot_type="RESTAURANT",
                     arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
                     is_relaxed_preference=is_relaxed,
                 )
+                # 인기 맛집 쿼터는 그 자리에서(마지막 슬롯이라고) 강제하지 않는다 — 하루치 식사를
+                # 전부 자연스럽게 고른 뒤, 아래서 "그중 인기 점수가 가장 낮은 슬롯"을 골라 교체한다.
+                day_meal_records.append({
+                    "item": meal_item, "prev_place": prev_place,
+                    "role_candidates": role_candidates, "meal_start_dt": meal_start_dt,
+                    "slot_duration_min": slot_duration_min,
+                })
                 visited_across_days.add(chosen_place.content_id)
                 current_place = chosen_place
                 order += 1
+
+        # 인기 맛집 재조정: 하루치 식사를 전부 자연스럽게 고른 뒤, 그중 인기 점수가 가장
+        # 낮은 슬롯부터 쿼터 부족분만큼 인기 맛집으로 교체한다 — "마지막 슬롯이라 강제"가
+        # 아니라 "그날 식사들 중 실제로 제일 아쉬운 슬롯"을 바꾸는 방식.
+        current_food_popular = sum(1 for m in day_meal_records if is_popular_place(m["item"].place))
+        food_deficit = food_popular_quota - current_food_popular
+        any_swapped = False
+        if food_deficit > 0:
+            worst_first = sorted(day_meal_records, key=lambda m: m["item"].place.popularity_score or 0)
+            for m in worst_first[:food_deficit]:
+                popular_alt = [
+                    p for p in m["role_candidates"]
+                    if is_popular_place(p) and p.content_id not in visited_across_days
+                ]
+                if not popular_alt:
+                    continue  # 이 슬롯엔 대체할 인기 후보가 없음 — 강제하지 않고 그대로 둔다
+
+                if m["prev_place"] is None:
+                    new_place = popular_alt[0]
+                    new_travel = snap_travel_time_5min(
+                        estimate_airport_travel_min(new_place.latitude, new_place.longitude, DEFAULT_VEHICLE)
+                    )
+                else:
+                    ranked = score_food_candidates(
+                        popular_alt, m["prev_place"], day_purpose_main, day_purpose_sub,
+                        mode, m["slot_duration_min"], get_travel_time_fn,
+                        relaxed_ids=relaxed_ids, nlp_scores=nlp_scores, visit_datetime=m["meal_start_dt"],
+                    )
+                    if not ranked:
+                        continue
+                    new_place = ranked[0]["place"]
+                    new_travel = snap_travel_time_5min(ranked[0]["travel_min"])
+
+                old_item = m["item"]
+                visited_across_days.discard(old_item.place_id)
+                visited_across_days.add(new_place.content_id)
+                old_item.place = new_place
+                old_item.travel_min_from_prev = new_travel
+                old_item.save(update_fields=["place", "travel_min_from_prev"])
+                any_swapped = True
+
+        if any_swapped:
+            # 교체로 어긋난 이후 일정의 이동시간·도착/출발 시각을 하루 처음부터 다시 흘려보낸다.
+            _replay_day_timeline(day_obj, get_travel_time_fn)
 
         if current_place and day_index < total_days:
             day_last_place_ids.append(current_place.content_id)
@@ -303,4 +432,3 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         f.write(f"[{mode}] 전체 소요: {time.time()-t_start:.2f}초\n")
 
     return course
-
