@@ -136,6 +136,7 @@ class Command(BaseCommand):
                     qual_category=self._to_float_or_none(row.get("qual_category", "")),
                     satisfaction_score=self._to_float_or_none(row.get("satisfaction_score", "")),
                     satisfaction_src=row.get("satisfaction_src", ""),
+                    popularity_score=self._to_float_or_none(row.get("popularity_score", "")),
                 ),
             )
         except Exception as e:

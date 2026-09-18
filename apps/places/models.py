@@ -122,6 +122,11 @@ class Place(models.Model):
     
     # embedding_vector = models.JSONField(null=True, blank=True)
 
+    popularity_score = models.FloatField(
+        null=True, blank=True,
+        help_text="AI_Hub obs_travel_n 기반 인기도 = 1-exp(-0.2*obs_travel_n). 미관측 시 0.0"
+    )
+
     class Meta:
         indexes = [
             models.Index(fields=["quadrant"]),
