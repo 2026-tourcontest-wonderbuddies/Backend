@@ -26,13 +26,10 @@ DINNER_TARGET_MIN = 19 * 60
 MIN_LEFTOVER_TO_RECORD = 20
 
 # 캐싱
-_place_cache = {"general": None, "food": None, "cached_at": None}
-CACHE_TTL_SECONDS = 3600  # 1시간
+_place_cache = {"general": None, "food": None}
 
 def _get_cached_places(matrix_ids):
-    import time
-    now = time.time()
-    if _place_cache["general"] is None or (now - (_place_cache["cached_at"] or 0)) > CACHE_TTL_SECONDS:
+    if _place_cache["general"] is None:   # 딱 한 번만 확인, TTL 없음
         _place_cache["general"] = list(
             Place.objects.exclude(content_type_name="음식점")
             .filter(content_id__in=matrix_ids)
@@ -43,7 +40,6 @@ def _get_cached_places(matrix_ids):
             .filter(content_id__in=matrix_ids)
             .defer("embedding_vector", "overview")
         )
-        _place_cache["cached_at"] = now
     return _place_cache["general"], _place_cache["food"]
 
 
