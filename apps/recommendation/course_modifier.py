@@ -21,8 +21,10 @@ DEFAULT_VEHICLE = "car"
 
 
 def _get_travel_time_fn(routing_engine):
-    def _fn(origin_id: str, destination_id: str) -> dict:
-        return routing_engine.get_travel_time(origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE)
+    def _fn(origin_id: str, destination_id: str, depart_at: datetime | None = None) -> dict:
+        return routing_engine.get_travel_time(
+            origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=depart_at
+        )
     return _fn
 
 def _travel_from_coords(lat:float, lon:float, place, transport_mode:str = "car") -> float:
@@ -53,13 +55,19 @@ def recalc_first_and_last_item_travel(course) -> None:
         first_item = items[0]
         last_item = items[-1]
 
+        target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+        day_start = datetime(
+            target_date.year, target_date.month, target_date.day,
+            day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
+        )
+
         # 첫 항목 이동시간
         if i == 0:
             if airport_available and first_item.place.content_id in matrix_ids:
                 # 매트릭스에 있으면 OSRM 실측값 사용
                 result = routing_engine.get_travel_time(
                     JEJU_AIRPORT_PROXY_CONTENT_ID, first_item.place.content_id,
-                    mode="osrm", vehicle=DEFAULT_VEHICLE
+                    mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=day_start,
                 )
                 travel_min_in = result["duration_min_adjusted"]
             else:
@@ -75,7 +83,7 @@ def recalc_first_and_last_item_travel(course) -> None:
                 lodging_content_id = lodging.get("content_id")
                 if lodging_content_id and lodging_content_id in matrix_ids and first_item.place.content_id in matrix_ids:
                     result = routing_engine.get_travel_time(lodging_content_id, first_item.place.content_id,
-                                                              mode="osrm", vehicle=DEFAULT_VEHICLE)
+                                                              mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=day_start)
                     travel_min_in = result["duration_min_adjusted"]
                 else:
                     travel_min_in = _travel_from_coords(lodging["lat"], lodging["lon"], first_item.place, DEFAULT_VEHICLE)
@@ -121,7 +129,7 @@ def recalc_first_and_last_item_travel(course) -> None:
                 # OSRM 실측값 사용
                 result = routing_engine.get_travel_time(
                     last_item.place.content_id, JEJU_AIRPORT_PROXY_CONTENT_ID,
-                    mode="osrm", vehicle=DEFAULT_VEHICLE
+                    mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=last_item.depart_at,
                 )
                 travel_min_out = result["duration_min_adjusted"]
             else:
@@ -136,7 +144,7 @@ def recalc_first_and_last_item_travel(course) -> None:
                 lodging_content_id = lodging.get("content_id")
                 if lodging_content_id and lodging_content_id in matrix_ids and last_item.place.content_id in matrix_ids:
                     result = routing_engine.get_travel_time(last_item.place.content_id, lodging_content_id,
-                                                              mode="osrm", vehicle=DEFAULT_VEHICLE)
+                                                              mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=last_item.depart_at)
                     travel_min_out = result["duration_min_adjusted"]
                 else:
                     travel_min_out = _travel_from_coords(lodging["lat"], lodging["lon"], last_item.place, DEFAULT_VEHICLE)
@@ -188,13 +196,13 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
         is_first_in_range = (idx == 0)
 
         if prev_place is not None and prev_place.content_id in matrix_ids and item.place.content_id in matrix_ids:
-            travel_result = get_travel_time_fn(prev_place.content_id, item.place.content_id)
+            travel_result = get_travel_time_fn(prev_place.content_id, item.place.content_id, depart_at=current_time)
             travel_min = travel_result["duration_min_adjusted"]
         elif is_first_in_range and start_order == 0 and day.day_index > 1 and prev_lodging:
             # Day2+ 첫 항목은 전날 숙소 좌표 기준으로 계산
             lodging_content_id = prev_lodging.get("content_id")
             if lodging_content_id and lodging_content_id in matrix_ids and item.place.content_id in matrix_ids:
-                travel_result = get_travel_time_fn(lodging_content_id, item.place.content_id)
+                travel_result = get_travel_time_fn(lodging_content_id, item.place.content_id, depart_at=current_time)
                 travel_min = travel_result["duration_min_adjusted"]
             else:
                 travel_min = _travel_from_coords(prev_lodging["lat"], prev_lodging["lon"], item.place, DEFAULT_VEHICLE)

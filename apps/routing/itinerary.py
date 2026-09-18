@@ -253,6 +253,10 @@ class DayPlan:
         }
 
 
+# 실주행 보정(α·β·k)이 걸리는 출처. 카카오 값은 이미 실시간이라 대상이 아니다.
+_OSRM_SOURCES = {"osrm", "osrm_fallback"}
+
+
 class Itinerary:
     def __init__(
         self,
@@ -315,6 +319,7 @@ class Itinerary:
             destination.content_id,
             mode="kakao" if realtime else "osrm",
             vehicle=self.vehicle,
+            depart_at=origin.depart_at,
         )
         return Leg(
             from_id=origin.content_id,
@@ -328,20 +333,47 @@ class Itinerary:
         )
 
     def _rebuild_legs(self, day: DayPlan, realtime: bool = False) -> None:
-        day.legs = [
-            self._compute_leg(day.stops[i], day.stops[i + 1], realtime)
-            for i in range(len(day.stops) - 1)
-        ]
+        """전방 패스 — **출발 시각을 확정하면서** 그 시각의 `k` 로 leg 를 계산한다.
 
-    def _reschedule(self, day: DayPlan) -> None:
-        """경로 재계산 없이 시각만 앞뒤로 흘려보낸다 (연쇄 시프트)."""
+        설계 §10 ⑥(k 는 출발 시각 기준)이 이 구조를 강제한다. 시각을 모르면 `k` 를 고를 수 없고
+        leg 를 모르면 다음 시각을 정할 수 없으므로, 예전처럼 leg 계산과 시각 배치를 두 패스로
+        나누면 언제나 시각이 빈 상태에서 `k` 를 물어보게 된다.
+        """
+        legs: list[Leg] = []
         cursor = day.start_at
         for i, stop in enumerate(day.stops):
-            if i > 0:
-                cursor += timedelta(minutes=day.legs[i - 1].duration_adjusted)
             stop.arrive_at = cursor
             cursor += timedelta(minutes=stop.stay_min)
             stop.depart_at = cursor
+            if i + 1 < len(day.stops):
+                leg = self._compute_leg(stop, day.stops[i + 1], realtime)
+                legs.append(leg)
+                cursor += timedelta(minutes=leg.duration_adjusted)
+        day.legs = legs
+
+    def _reschedule(self, day: DayPlan) -> None:
+        """시각을 앞뒤로 흘려보낸다 (연쇄 시프트).
+
+        시각이 밀리면 `k` 도 바뀌므로 **OSRM 계열 leg 는 새 출발 시각으로 다시 계산한다** —
+        사전계산 매트릭스 조회라 외부 호출이 0건이고 비용이 없다.
+        카카오 leg 는 손대지 않는다 — 이미 실시간 실측값이고, 재호출은 쿼터를 태우면서
+        "변경 1건당 최대 2 leg" 불변식을 깬다.
+        """
+        cursor = day.start_at
+        for i, stop in enumerate(day.stops):
+            stop.arrive_at = cursor
+            cursor += timedelta(minutes=stop.stay_min)
+            stop.depart_at = cursor
+            if i < len(day.legs):
+                current = day.legs[i]
+                if current.source in _OSRM_SOURCES:
+                    fresh = self._compute_leg(stop, day.stops[i + 1], realtime=False)
+                    # 값이 같으면 **객체를 그대로 둔다.** 시각이 같은 시간대 안에서 움직이면
+                    # k 가 안 바뀌는 경우가 대부분이고, 호출부는 leg 객체가 바뀐 것을
+                    # "이 구간이 실제로 달라졌다"는 신호로 읽는다. 헛되이 바꾸지 않는다.
+                    if fresh.duration_adjusted != current.duration_adjusted:
+                        day.legs[i] = fresh
+                cursor += timedelta(minutes=day.legs[i].duration_adjusted)
 
     # --- 변경 연산 (Ripple Effect) --------------------------------------
 

@@ -122,7 +122,7 @@ def filter_candidates(
 
         # 이동시간 계산 (현재 위치가 없으면 0으로 취급 — 코스 첫 장소인 경우)
         if current_place is not None:
-            travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
+            travel_result = get_travel_time_fn(current_place.content_id, place.content_id, depart_at=visit_datetime)
             travel_min = travel_result["duration_min_adjusted"]
         else:
             travel_min = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)

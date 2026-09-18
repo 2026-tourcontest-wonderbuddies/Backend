@@ -26,8 +26,10 @@ MIN_LEFTOVER_TO_RECORD = 20
 
 
 def _get_travel_time_fn(routing_engine):
-    def _fn(origin_id: str, destination_id: str) -> dict:
-        return routing_engine.get_travel_time(origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE)
+    def _fn(origin_id: str, destination_id: str, depart_at: datetime | None = None) -> dict:
+        return routing_engine.get_travel_time(
+            origin_id, destination_id, mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=depart_at
+        )
     return _fn
 
 
@@ -233,7 +235,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                     ranked = score_food_candidates(
                         role_candidates, current_place, day_purpose_main, day_purpose_sub,
                         mode, slot_duration_min, get_travel_time_fn,
-                        relaxed_ids=relaxed_ids, nlp_scores=nlp_scores,
+                        relaxed_ids=relaxed_ids, nlp_scores=nlp_scores, visit_datetime=meal_start_dt,
                     )
                     if not ranked:
                         continue

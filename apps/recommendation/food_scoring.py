@@ -170,6 +170,7 @@ def score_food_candidates(
     relaxed_ids: set = None,
     nlp_scores: dict = None,    # 완화 필터 적용된 place_id 집합 (소프트 필터 감점용)
     transport_mode="car",
+    visit_datetime=None,       # 이동시간 혼잡보정 k(t) 조회용 출발 시각
 ) -> list[dict]:
     """
     calc_purpose_fit()으로 시너지보너스 포함 PurposeFit 계산 ->
@@ -185,7 +186,7 @@ def score_food_candidates(
     scored = []
     for place in candidates:
         if current_place is not None:
-            travel_result = get_travel_time_fn(current_place.content_id, place.content_id)
+            travel_result = get_travel_time_fn(current_place.content_id, place.content_id, depart_at=visit_datetime)
             travel_min = travel_result["duration_min_adjusted"]
         else:
             travel_min = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)

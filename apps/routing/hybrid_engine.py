@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -43,51 +44,119 @@ TIME_BUCKET_MIN = 30
 KAKAO_RESPONSE_CACHE_ENABLED = False
 KAKAO_RESPONSE_STORAGE_ALLOWED = False
 
-# §5 실주행 보정
+# §5 오버헤드 보정
 #   OSRM 값:  T_actual = T_route × ROUTE_FACTOR + OSRM_TRAFFIC_OFFSET_MIN
-#   카카오 값: T_actual = T_kakao                (이미 실측 주행시간이므로 보정 금지)
+#   카카오 값: T_actual = T_kakao              (이미 실측 주행시간이므로 보정 금지)
+#   ※ 오버헤드 가산항은 2026-08-29 제거됐다 (아래 SUPPORTED_VEHICLES 주석 참조).
 #
-# **2026-08-27 비활성화 (1.11 / 9.6 → 1.0 / 0.0).**
-#
-# 종전 값은 calibrate_overhead.py 로 적합한 것이었다(표본 300쌍, 2026-08-14 18:09 KST,
-# 기울기 1.1107 · 절편 9.58분 · R² 0.900). 그런데 VVMS 실측으로 같은 조건에서 대조하니
-# **보정을 하면 오히려 두 배 나빠진다**:
-#
-#     OSRM 원값          MAE 4.44  편향 -3.25
-#     OSRM + 1.11T+9.6   MAE 8.28  편향 +7.99   ← 구간마다 8분씩 과대추정
-#
-# 거리대별로는 10~20km 에서 편향이 +10.84분까지 벌어진다. 절편 9.6분이 짧은 구간을
-# 겨냥해 적합된 값인데 전 구간에 가산되기 때문이다. 08.24 가 23쌍으로 예비 판정했던
-# 것(과대추정 6.3~7.8분)이 408관측에서 더 크게 확인됐다.
-#
-# ⚠️ 원값도 편향 -3.25분(과소추정)이 남는다. 0 으로 되돌린 것은 "보정이 필요 없다"가
-#    아니라 **"이 보정식이 안 하느니만 못하다"** 는 뜻이다.
-#    같은 표본의 재적합값은 `0.819·T + 5.9`(MAE 3.40 · 편향 0.00)지만 OD 16쌍
-#    **in-sample** 이라 채택하지 않았다. 표본이 늘면 이 자리를 다시 볼 것.
-#
-# 근거: docs/08.27_보정식_비활성화.md · 재현은 아래 한 줄
-#   python routing/compare_vvms_nodelink.py --router osrm --osrm-correction \
-#          --patch --exclude "" --max-dev 60
-ROUTE_FACTOR = 1.0
-OSRM_TRAFFIC_OFFSET_MIN = 0.0
+# ROUTE_FACTOR / OSRM_TRAFFIC_OFFSET_MIN 은 calibrate_overhead.py 로 적합한 값이다.
+# 표본 300쌍, 2026-08-14 18:09 KST 호출 기준: 기울기 1.1107, 절편 9.58분, R² 0.900.
+# 초안의 1.1 은 기울기로는 정확했으나 상수항이 누락되어 구간당 평균 9.85분을 과소 추정했다.
+# ※ 단일 시간대(퇴근 무렵) 표본이므로 절편은 상한에 가깝다. 시간대별 재적합 필요.
+# ⚠️ **2026-08-29 교체** (팀 승인). 근거: docs/08.26_표준노드링크_지오메트리_실행계획.md §6-1 ①
+#   ⚠️ 2026-08-29 재적합 (부속도서 페리 제외 후). 첫 적합값(α=0.9025 · β=3.75)은
+#      **페리 경로에 오염**돼 있었다 — 60분+ 층의 16.8%가 페리 쌍이었고 그 층이 기울기를
+#      지배한다. 제외 후 α 가 0.90 → 1.00 으로 올라갔다.
+#   이전 값 ROUTE_FACTOR=1.11 · OSRM_TRAFFIC_OFFSET_MIN=9.6 은 **카카오 300쌍을 2026-08-14
+#   18:09(퇴근)에 한 번 재서 얻은 값**이라 상수 셋이 전부 혼잡 시간대 값이었다. 모든 시각에
+#   그대로 적용해 자유주행 시간대를 구간당 약 9.5분 과대추정했다.
+#   새 값은 ITS 라벨 2,991쌍 × 48셀에서 자유주행(평일 04시)만 떼어 적합한 것이다.
+ROUTE_FACTOR = 0.9991          # α — 자유주행 배율. 95% CI 0.9934–1.0048
+FREEFLOW_OFFSET_MIN = 1.55     # β — 자유주행 고정지연 (측정값)
 
-# 주차·도보(자가용 10분) / 승하차 대기(택시 5분) 오버헤드는 **2026-08-27 팀 합의로 제거**했다.
+# ⚠️ **미검증 상수** (설계 원칙 5). ITS 링크 통행시간에는 교차로 **노드 대기**가 없다.
+# 카카오와 겹치는 셀에서만 잴 수 있는데, **기울기가 맞는 셀에서만** 절편차를 읽어야 한다
+# (기울기가 다르면 절편이 서로 상쇄된다). 13시 두 셀(일 n=199 · 화 n=200)이 그 조건을
+# 만족하고, 예측차가 구간 길이 10~60분에서 −4.9 ~ −4.0분으로 **평평하다**(폭 0.6분) —
+# 덧셈항의 서명이다. 18시 셀은 기울기가 0.13 어긋나 읽지 않는다.
+# 운영 도착시각 피드백으로 **이 값만** 조정하면 되고, 0 으로 내리면 순수 측정값(1.55)이 된다.
+NODE_DELAY_MIN = 4.43
+
+# 자유주행 고정항. k 와 함께 곱해진다(아래 apply_correction 참조).
+FIXED_MIN = FREEFLOW_OFFSET_MIN + NODE_DELAY_MIN   # 5.98
+
+# 시간대 혼잡지수 `k(t)` 산출물. **경로 기준**(time_index_route.csv)이 정본이고,
+# 없으면 링크 기준(time_index.csv)으로, 그것도 없으면 k≡1 로 떨어진다.
+# k≡1 이면 산식이 (OSRM×α + 7.05) 로 자유주행 값을 그대로 낸다 — 설계 §4.5 항등성.
+TIME_INDEX_FILES = ("time_index_route.csv", "time_index.csv")
+PLACE_ZONE_FILE = "place_zone.csv"
+
+# 쌍별 혼잡 민감도 θ. `build_route_theta.py` 산출물이고 **선택 자산**이다.
+#   k_route(쌍, 셀) ≈ 1 + θ(쌍) · ( k_global(셀) − 1 )
+# 파일이 없거나 그 쌍이 SENTINEL 이면 권역/전역 곡선으로 조용히 떨어진다.
+# 시간 분할 검증에서 전역 대비 MAE −1.008분, θ 근사로 −0.978분(97% 회수)이었다.
+# 근거: routing/eval_route_k.py · docs/08.26_..._실행계획.md §8
+ROUTE_THETA_FILE = "route_theta.npy"
+THETA_SCALE = 10_000
+THETA_SENTINEL = 65535
+
+# ⚠️ **오버헤드 상수항(주차·도보 10분 / 승하차 5분)은 제거됐다** (2026-08-29 팀 결정).
+# 실측 근거가 끝내 없었고, 측정 수단도 없었다 — OSRM·카카오 어느 응답에도 들어 있지 않고
+# AI Hub 이동내역은 시각 해상도가 30분이라 10분짜리 상수를 잴 수 없다(설계서 §5-B).
 #
-# 팀 협의로 정한 값이었을 뿐 실측 근거가 없었다. OSRM·카카오 어느 응답에도 포함되지 않아
-# ROUTE_FACTOR·OSRM_TRAFFIC_OFFSET_MIN 과 같은 방식으로는 측정할 수 없고, AI Hub 이동내역도
-# 시각 해상도가 30분이라 10분짜리 상수를 잴 수 없다(설계서 §5-B). 구간당 상수 19.6분의
-# 51%를 차지해 민감도가 컸던 것이 제거 사유다.
-#
-# ⚠️ 0 은 "주차·도보에 시간이 안 든다"는 뜻이 아니라 **모델링하지 않는다**는 뜻이다.
-#    일정이 그만큼 낙관적으로 나오므로(하루 5구간이면 50분) 하루 방문 수를 이 값으로
-#    판단하지 말 것. 실측이 생기면 여기만 되돌리면 된다 — 순수 가산 상수라 다른 계수에
-#    영향을 주지 않는다.
-#
-# vehicle 은 계속 받는다. 값 검증에 쓰이고, 되돌릴 자리를 남겨 둔다.
-OVERHEAD_MIN = {"car": 0, "rental": 0, "taxi": 0}
+# 제거로 열린 것이 하나 있다. 오버헤드가 빠지면 카카오 절편과 ITS 절편이 **같은 것을 재는 값**이
+# 된다(둘 다 주차·도보 없는 문앞-문앞 주행시간). 그 차이 약 3.3분이 ITS 링크속도에 없는
+# 교차로 노드 대기이며, 이것이 재적합의 근거가 됐다 —
+# docs/08.26_표준노드링크_지오메트리_실행계획.md §6-1 ①.
+SUPPORTED_VEHICLES = ("car", "rental", "taxi")
+
+# ponytail: OSRM nearest API로 실측 스냅 거리를 재는 대신, 이미 로드된 OSRM
+# 도로거리 ÷ 직선거리 비율로 근사한다. 페리로만 닿는 부속도서 등에서 비율이
+# 비정상적으로 커진다. 오탐이 잦으면 OSRM nearest 연동으로 교체.
+KAKAO_ROUTABLE_MAX_RATIO = 5.0
 
 # 실주행 보정이 필요한 출처 (카카오 응답은 제외 — 이중 계산 방지)
 _NEEDS_TRAFFIC_CORRECTION = {"osrm", "osrm_fallback"}
+
+
+def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """두 (lon, lat) 사이 직선거리(m)."""
+    lon1, lat1 = a
+    lon2, lat2 = b
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    h = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    return 6_371_000.0 * 2 * math.asin(math.sqrt(h))
+
+
+def _load_holidays(data_dir: Path) -> set:
+    """`holidays.csv` 의 날짜 집합. 대체공휴일까지 넣어야 한다.
+
+    ⚠️ 요일만으로 가르면 대체공휴일을 평일로 넣는다. 2026-08-17(광복절 대체)이 실측으로
+    **주말 곡선에 3.2배 가깝다**(EDA §6). 파일이 없으면 토·일만 weekend 로 분류한다.
+    """
+    path = data_dir / "holidays.csv"
+    if not path.exists():
+        logger.warning("공휴일 목록이 없습니다(holidays.csv) — 토·일만 weekend 로 봅니다")
+        return set()
+    col = pd.read_csv(path, dtype=str)
+    name = "date" if "date" in col.columns else col.columns[0]
+    return {datetime.strptime(v.strip(), "%Y-%m-%d").date() for v in col[name].dropna()}
+
+
+def _load_time_index(data_dir: Path) -> dict[tuple[str, str, int], float]:
+    """`(zone, daytype, hour) → k`. 채택 표시가 있는 행만 싣는다.
+
+    `source` 가 `reference_route` 인 행은 **산출은 됐지만 채택되지 않은** 곡선이다
+    (§S5 — 서귀포·권역간은 홀드아웃에서 전역 곡선이 더 나았다). 실으면 안 된다.
+    """
+    for name in TIME_INDEX_FILES:
+        path = data_dir / name
+        if not path.exists():
+            continue
+        table = pd.read_csv(path)
+        if "source" in table.columns:
+            table = table[table["source"].isin({"fitted", "fitted_route", "merged"})]
+        if "zone" not in table.columns:
+            table = table.assign(zone="ALL")
+        logger.info("시간대 지수 로드: %s (%d행)", name, len(table))
+        return {
+            (str(z), str(d), int(h)): float(k)
+            for z, d, h, k in zip(table["zone"], table["daytype"], table["hour"], table["k"])
+        }
+    logger.warning("시간대 지수 파일이 없어 k≡1 로 동작합니다 (설계 §4.5 항등성)")
+    return {}
 
 logger = logging.getLogger("hybrid_routing")
 
@@ -300,6 +369,21 @@ class HybridRoutingEngine:
         self.cache_hits = 0
         self.cache_misses = 0
 
+        # 시간대 혼잡지수와 권역. 둘 다 **선택 자산**이다 — 없으면 k≡1 로 떨어진다.
+        self._k_index = _load_time_index(self.data_dir)
+        zone_path = self.data_dir / PLACE_ZONE_FILE
+        self._zone_of: dict[str, str] = {}
+        if zone_path.exists():
+            zt = pd.read_csv(zone_path, dtype={"content_id": str})
+            self._zone_of = dict(zip(zt["content_id"], zt["zone"]))
+        self._holidays = _load_holidays(self.data_dir)
+
+        theta_path = self.data_dir / ROUTE_THETA_FILE
+        self._theta = np.load(theta_path) if theta_path.exists() else None
+        if self._theta is not None:
+            filled = int((self._theta != THETA_SENTINEL).sum())
+            logger.info("쌍별 θ 로드: %s (%d쌍)", ROUTE_THETA_FILE, filled)
+
     # --- 공개 인터페이스 -------------------------------------------------
 
     def get_travel_time(
@@ -315,7 +399,6 @@ class HybridRoutingEngine:
         mode='kakao': 실시간 재탐색/챗봇 장소 변경 시에만 호출
         반환: {"duration_min": ..., "distance_m": ..., "source": "osrm"|"kakao"|...}
         vehicle 지정 시 §5 실주행 보정값(duration_min_adjusted)을 함께 반환한다.
-        (주차·도보 오버헤드는 2026-08-27 제거 — OVERHEAD_MIN 주석 참조)
         """
         origin_id, destination_id = str(origin_id), str(destination_id)
         for cid in (origin_id, destination_id):
@@ -330,28 +413,93 @@ class HybridRoutingEngine:
             raise ValueError(f"지원하지 않는 mode: {mode!r} (osrm|kakao)")
 
         if vehicle is not None:
-            result["duration_min_adjusted"] = self.apply_overhead(
-                result["duration_min"], vehicle, source=result["source"]
+            k, zone = (self.congestion_factor(origin_id, destination_id, depart_at)
+                       if result["source"] in _NEEDS_TRAFFIC_CORRECTION else (1.0, "ALL"))
+            result["duration_min_adjusted"] = self.apply_correction(
+                result["duration_min"], vehicle, source=result["source"], k=k
             )
             result["vehicle"] = vehicle
+            result["k"] = round(k, 4)
+            result["zone"] = zone
         return result
 
-    @staticmethod
-    def apply_overhead(duration_min: float, vehicle: str, source: str = "osrm") -> float:
-        """§5 보정. 출처가 OSRM 계열일 때만 실주행 보정(기울기·절편)을 적용한다.
+    def congestion_factor(
+        self, origin_id: str, destination_id: str, depart_at: datetime | None
+    ) -> tuple[float, str]:
+        """`k(출발시각, …)` 과 그 값이 어디서 왔는지. 모르면 (1.0, "ALL").
 
-        카카오 응답은 이미 실시간 교통이 반영된 값이라 보정하면 이중 계산이 된다.
+        조회는 **3단**이고 정밀한 쪽이 먼저다 — `pair`(쌍별 θ) → 권역 → `ALL`.
+        각 단계의 자산이 없으면 다음으로 조용히 떨어진다.
 
-        2026-08-27 부터 주차·도보 오버헤드는 더하지 않는다(`OVERHEAD_MIN` 주석 참조).
-        이름은 호출부 호환을 위해 유지한다 — 지금 하는 일은 실주행 보정뿐이다.
+        **출발 시각 기준이다** (설계 §10 ⑥). 전방 패스에서 이미 확정된 유일한 값이라서다.
+        권역은 양 끝 POI 가 **같은 권역일 때만** 그 권역 곡선을 쓰고, 다르면 `ALL` 로 간다 —
+        권역 간 이동은 쌍마다 두 권역을 지나는 비율이 달라 단일 곡선으로 뭉갤 수 없다(§S5).
         """
-        if vehicle not in OVERHEAD_MIN:
-            raise ValueError(f"지원하지 않는 vehicle: {vehicle!r} ({'|'.join(OVERHEAD_MIN)})")
+        if not self._k_index or depart_at is None:
+            return 1.0, "ALL"
+        stamp = depart_at.astimezone(KST) if depart_at.tzinfo else depart_at
+        daytype = ("weekend"
+                   if stamp.weekday() >= 5 or stamp.date() in self._holidays
+                   else "weekday")
+
+        k_all = self._k_index.get(("ALL", daytype, stamp.hour))
+
+        # ① 쌍별 θ — 가장 정밀하다. 사전계산된 쌍에서만 있다.
+        if self._theta is not None and k_all is not None:
+            raw = int(self._theta[self._pos[origin_id], self._pos[destination_id]])
+            if raw != THETA_SENTINEL:
+                theta = raw / THETA_SCALE
+                return 1.0 + theta * (k_all - 1.0), "pair"
+
+        # ② 권역 — 양 끝 POI 가 **같은 권역일 때만**. 권역 간 이동은 쌍마다 두 권역을 지나는
+        #    비율이 달라 단일 곡선으로 뭉갤 수 없다(§S5).
+        zo, zd = self._zone_of.get(origin_id), self._zone_of.get(destination_id)
+        zone = zo if (zo is not None and zo == zd) else "ALL"
+        for candidate in (zone, "ALL"):
+            k = self._k_index.get((candidate, daytype, stamp.hour))
+            if k is not None:
+                return float(k), candidate
+        return 1.0, "ALL"
+
+    @staticmethod
+    def apply_correction(duration_min: float, vehicle: str, source: str = "osrm",
+                         k: float = 1.0) -> float:
+        """§5 보정. 출처가 OSRM 계열일 때만 실주행 보정을 적용한다.
+
+            T = OSRM × α × k(t)  +  β + NODE_DELAY
+
+        **고정항은 `k` 밖에 둔다**(설계 §4.1 원안 = 구조 B). 2026-08-29 부속도서 제외 전
+        데이터로는 구조 C 가 나아 보였으나, 페리 경로가 회귀의 긴 쪽을 끌어내린 결과였다.
+        깨끗한 라벨로 다시 재면 카카오 3셀 평균 절대오차가 **B 1.28분 vs C 1.91분** 이다.
+        근거: docs/08.26_..._실행계획.md §6-1 ①
+
+        카카오 응답은 이미 실시간 교통이 반영된 값이라 α·β·k 를 **적용하지 않는다** —
+        하면 이중 계산이 된다.
+
+        `vehicle` 은 **검증만 하고 값에는 쓰지 않는다** — 오버헤드 제거(2026-08-29) 이후
+        차종별로 갈리는 항이 없어졌다. 호출부 계약을 유지하려고 인자는 남겨 둔다.
+        """
+        if vehicle not in SUPPORTED_VEHICLES:
+            raise ValueError(f"지원하지 않는 vehicle: {vehicle!r} ({'|'.join(SUPPORTED_VEHICLES)})")
         if source in _NEEDS_TRAFFIC_CORRECTION:
-            driving_min = duration_min * ROUTE_FACTOR + OSRM_TRAFFIC_OFFSET_MIN
+            driving_min = duration_min * ROUTE_FACTOR * k + FIXED_MIN
         else:
             driving_min = duration_min
-        return round(driving_min + OVERHEAD_MIN[vehicle], 1)
+        return round(driving_min, 1)
+
+    def kakao_routable(self, origin_id: str, destination_id: str) -> bool:
+        """목적지가 카카오로 경로 탐색이 될 만한 곳인지 사전 판단.
+
+        OSRM 도로거리 ÷ 직선거리 비율이 `KAKAO_ROUTABLE_MAX_RATIO` 를 넘으면
+        페리로만 닿는 부속도서 등 도로로 이어지지 않는 구간으로 보고 False —
+        실패할 게 뻔한 카카오 호출과 쿼터 소모를 미리 피한다.
+        """
+        straight_m = _haversine_m(self._coords[origin_id], self._coords[destination_id])
+        if straight_m < 50:  # 같은 지점 근방
+            return True
+        i, j = self._pos[origin_id], self._pos[destination_id]
+        road_m = float(self.distances_m[i, j])
+        return road_m / straight_m <= KAKAO_ROUTABLE_MAX_RATIO
 
     def place(self, content_id: str) -> pd.Series:
         return self._index.loc[str(content_id)]
@@ -406,6 +554,9 @@ class HybridRoutingEngine:
         if not self.api_key:
             return self._fallback(origin_id, destination_id, "no_api_key")
 
+        if not self.kakao_routable(origin_id, destination_id):
+            return self._fallback(origin_id, destination_id, "not_routable")
+
         try:
             self.quota.consume()
         except QuotaExceeded:
@@ -441,3 +592,18 @@ class HybridRoutingEngine:
         distance_m = round(float(summary["distance"]), 1)
         # 여기서 cache.set() 을 부르면 응답 보관 금지 위반이다. 반환만 하고 버린다.
         return {"duration_min": duration_min, "distance_m": distance_m, "source": "kakao"}
+
+
+def _demo() -> None:
+    """ponytail self-check: _haversine_m 및 routable 임계값 로직만 검증한다."""
+    seoul, busan = (126.9780, 37.5665), (129.0756, 35.1796)
+    d = _haversine_m(seoul, busan)
+    assert 320_000 < d < 330_000, f"직선거리 계산이 어긋남: {d}"
+
+    assert (150_000 / 100_000) <= KAKAO_ROUTABLE_MAX_RATIO  # 일반적인 도로 우회
+    assert (600_000 / 100_000) > KAKAO_ROUTABLE_MAX_RATIO   # 페리급 비정상 우회
+    print("hybrid_engine self-check OK")
+
+
+if __name__ == "__main__":
+    _demo()
