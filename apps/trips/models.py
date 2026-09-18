@@ -13,6 +13,7 @@
 """
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from apps.places.models import Place, Lodging
 
@@ -25,7 +26,8 @@ class TripRequest(models.Model):
     start_date = models.DateField(help_text="입국수속 마친 후 실제 활동 시작 시각 (제주공항 기준)")
     end_date = models.DateField(help_text="복귀편 출발 위해 공항 도착 필요한 시각")
 
-    guests = models.IntegerField(default=2, help_text="1~20명, 기본 2명 (AI Hub 실측 중앙값)")
+    guests = models.IntegerField(default=2, validators=[MinValueValidator(1), MaxValueValidator(20)],
+                                 help_text="1~20명, 기본 2명 (AI Hub 실측 중앙값)")
 
     PURPOSE_CHOICES = [
         ("nature", "힐링/자연"), ("food", "음식/카페"), ("photo", "사진/감성"),
