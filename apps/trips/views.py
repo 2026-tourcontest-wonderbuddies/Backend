@@ -25,7 +25,9 @@ from apps.recommendation.course_modifier import (
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from dj_rest_auth.registration.views import SocialLoginView
-from django.db import transaction
+from django.db import transaction 
+
+import time
 
 class TripRequestCreateView(APIView):
     def post(self, request):
@@ -33,11 +35,21 @@ class TripRequestCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            trip = serializer.save(user=request.user if request.user.is_authenticated else None)
-            routing_engine = get_routing_engine()
-            courses = generate_all_courses(trip, routing_engine)
+            with transaction.atomic():
+                trip = serializer.save(user=request.user if request.user.is_authenticated else None)
+                routing_engine = get_routing_engine()
+
+                start = time.time()
+                courses = generate_all_courses(trip, routing_engine)
+                elapsed = time.time() - start
+
+                with open("debug_log.txt", "a") as f:
+                    f.write(f"\n=== 전체 요청 ===\n")
+                    f.write(f"generate_all_courses 전체: {elapsed:.2f}초\n")
+
         except Exception as e:
-            return Response({"trip_id": trip.id, "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         return Response({"trip_id": trip.id, "course_ids": {c.mode: c.id for c in courses}},
                          status=status.HTTP_201_CREATED)
 

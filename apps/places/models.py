@@ -119,6 +119,8 @@ class Place(models.Model):
         null=True, blank=True, help_text="★=AdjustedQual_k. Micro 수식에 바로 대입"
     )
     satisfaction_src = models.CharField(max_length=20, blank=True)
+    
+    embedding_vector = models.JSONField(null=True, blank=True)
 
     class Meta:
         indexes = [

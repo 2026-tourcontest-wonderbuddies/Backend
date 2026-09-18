@@ -6,6 +6,7 @@ LodgingRequest로 변환 → recommend_anchor() 호출 → 결과를 다시 우�
 
 from accommodations.lodging_filter import TripContext, LodgingRequest
 from accommodations.recommend import LodgingRecommender
+from accommodations.openai_embedder import OpenAIEmbedder
 from apps.places.models import LodgingImage
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -18,6 +19,19 @@ REGION_MAP = {
     "SE": "남부동",
     "SW": "남부서",
 }
+
+_recommender = None
+
+def _get_recommender():
+    global _recommender
+    if _recommender is None:
+        print("🔴 새로 생성 중...")
+        start = time.time()
+        _recommender = LodgingRecommender(embedder=OpenAIEmbedder())
+        print(f"🔴 생성 완료: {time.time()-start:.2f}초")
+    else:
+        print("✅ 캐시 재사용")
+    return _recommender
 
 # ★ accommodations 계약(§L0)이 요구하는 형식: 'YYYY-MM-DD'
 def _to_date_str(dt) -> str:
@@ -60,7 +74,7 @@ def get_lodging_anchor(
         free_text=trip.lodging_free_text,
     )
 
-    recommender = LodgingRecommender()  # engine=None → routing/hybrid_engine 자동 로드
+    recommender = _get_recommender() 
     segments = recommender.recommend_anchor(trip_ctx, lodging_request, top_n=3)
 
     # 숙소 이미지 목록
