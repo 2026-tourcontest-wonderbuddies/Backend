@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -99,8 +100,24 @@ THETA_SENTINEL = 65535
 # docs/08.26_표준노드링크_지오메트리_실행계획.md §6-1 ①.
 SUPPORTED_VEHICLES = ("car", "rental", "taxi")
 
+# ponytail: OSRM nearest API로 실측 스냅 거리를 재는 대신, 이미 로드된 OSRM
+# 도로거리 ÷ 직선거리 비율로 근사한다. 페리로만 닿는 부속도서 등에서 비율이
+# 비정상적으로 커진다. 오탐이 잦으면 OSRM nearest 연동으로 교체.
+KAKAO_ROUTABLE_MAX_RATIO = 5.0
+
 # 실주행 보정이 필요한 출처 (카카오 응답은 제외 — 이중 계산 방지)
 _NEEDS_TRAFFIC_CORRECTION = {"osrm", "osrm_fallback"}
+
+
+def _haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """두 (lon, lat) 사이 직선거리(m)."""
+    lon1, lat1 = a
+    lon2, lat2 = b
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    h = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2)
+    return 6_371_000.0 * 2 * math.asin(math.sqrt(h))
 
 
 def _load_holidays(data_dir: Path) -> set:
@@ -470,6 +487,20 @@ class HybridRoutingEngine:
             driving_min = duration_min
         return round(driving_min, 1)
 
+    def kakao_routable(self, origin_id: str, destination_id: str) -> bool:
+        """목적지가 카카오로 경로 탐색이 될 만한 곳인지 사전 판단.
+
+        OSRM 도로거리 ÷ 직선거리 비율이 `KAKAO_ROUTABLE_MAX_RATIO` 를 넘으면
+        페리로만 닿는 부속도서 등 도로로 이어지지 않는 구간으로 보고 False —
+        실패할 게 뻔한 카카오 호출과 쿼터 소모를 미리 피한다.
+        """
+        straight_m = _haversine_m(self._coords[origin_id], self._coords[destination_id])
+        if straight_m < 50:  # 같은 지점 근방
+            return True
+        i, j = self._pos[origin_id], self._pos[destination_id]
+        road_m = float(self.distances_m[i, j])
+        return road_m / straight_m <= KAKAO_ROUTABLE_MAX_RATIO
+
     def place(self, content_id: str) -> pd.Series:
         return self._index.loc[str(content_id)]
 
@@ -523,6 +554,9 @@ class HybridRoutingEngine:
         if not self.api_key:
             return self._fallback(origin_id, destination_id, "no_api_key")
 
+        if not self.kakao_routable(origin_id, destination_id):
+            return self._fallback(origin_id, destination_id, "not_routable")
+
         try:
             self.quota.consume()
         except QuotaExceeded:
@@ -558,3 +592,18 @@ class HybridRoutingEngine:
         distance_m = round(float(summary["distance"]), 1)
         # 여기서 cache.set() 을 부르면 응답 보관 금지 위반이다. 반환만 하고 버린다.
         return {"duration_min": duration_min, "distance_m": distance_m, "source": "kakao"}
+
+
+def _demo() -> None:
+    """ponytail self-check: _haversine_m 및 routable 임계값 로직만 검증한다."""
+    seoul, busan = (126.9780, 37.5665), (129.0756, 35.1796)
+    d = _haversine_m(seoul, busan)
+    assert 320_000 < d < 330_000, f"직선거리 계산이 어긋남: {d}"
+
+    assert (150_000 / 100_000) <= KAKAO_ROUTABLE_MAX_RATIO  # 일반적인 도로 우회
+    assert (600_000 / 100_000) > KAKAO_ROUTABLE_MAX_RATIO   # 페리급 비정상 우회
+    print("hybrid_engine self-check OK")
+
+
+if __name__ == "__main__":
+    _demo()
