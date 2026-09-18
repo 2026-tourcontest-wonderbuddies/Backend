@@ -10,6 +10,7 @@ from accommodations.openai_embedder import OpenAIEmbedder
 from apps.places.models import LodgingImage
 from typing import Optional
 from zoneinfo import ZoneInfo
+import time
 
 KST = ZoneInfo("Asia/Seoul")
 
