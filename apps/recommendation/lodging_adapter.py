@@ -4,8 +4,6 @@ Django ORM을 전혀 안 쓰고, TripRequest 딕셔너리를 accommodations의 T
 LodgingRequest로 변환 → recommend_anchor() 호출 → 결과를 다시 우리 JSON 구조로 변환.
 """
 
-import time
-
 from accommodations.lodging_filter import TripContext, LodgingRequest
 from accommodations.recommend import LodgingRecommender
 from accommodations.openai_embedder import OpenAIEmbedder
