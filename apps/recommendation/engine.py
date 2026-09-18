@@ -25,6 +25,27 @@ DINNER_TARGET_MIN = 19 * 60
 
 MIN_LEFTOVER_TO_RECORD = 20
 
+# 캐싱
+_place_cache = {"general": None, "food": None, "cached_at": None}
+CACHE_TTL_SECONDS = 3600  # 1시간
+
+def _get_cached_places(matrix_ids):
+    import time
+    now = time.time()
+    if _place_cache["general"] is None or (now - (_place_cache["cached_at"] or 0)) > CACHE_TTL_SECONDS:
+        _place_cache["general"] = list(
+            Place.objects.exclude(content_type_name="음식점")
+            .filter(content_id__in=matrix_ids)
+            .defer("embedding_vector", "overview")
+        )
+        _place_cache["food"] = list(
+            Place.objects.filter(content_type_name="음식점")
+            .filter(content_id__in=matrix_ids)
+            .defer("embedding_vector", "overview")
+        )
+        _place_cache["cached_at"] = now
+    return _place_cache["general"], _place_cache["food"]
+
 
 def _get_travel_time_fn(routing_engine):
     def _fn(origin_id: str, destination_id: str, depart_at: datetime | None = None) -> dict:
@@ -102,16 +123,9 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     total_days = len(day_schedules)
 
     matrix_ids = set(routing_engine._pos.keys())
-    all_general_places = list(
-        Place.objects.exclude(content_type_name="음식점")
-        .filter(content_id__in=matrix_ids)
-        .defer("embedding_vector")
-    )
-    all_food_places = list(
-        Place.objects.filter(content_type_name="음식점")
-        .filter(content_id__in=matrix_ids)
-        .defer("embedding_vector")
-    )
+
+    # 매번 DB조회 X, 캐시 사용
+    all_general_places, all_food_places = _get_cached_places(matrix_ids)
 
     get_travel_time_fn = _get_travel_time_fn(routing_engine)
     get_stay_time_fn = lambda p: p.stay_time_minutes

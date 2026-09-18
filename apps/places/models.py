@@ -120,7 +120,7 @@ class Place(models.Model):
     )
     satisfaction_src = models.CharField(max_length=20, blank=True)
     
-    embedding_vector = models.JSONField(null=True, blank=True)
+    # embedding_vector = models.JSONField(null=True, blank=True)
 
     class Meta:
         indexes = [
