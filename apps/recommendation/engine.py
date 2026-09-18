@@ -33,12 +33,12 @@ def _get_cached_places(matrix_ids):
         _place_cache["general"] = list(
             Place.objects.exclude(content_type_name="음식점")
             .filter(content_id__in=matrix_ids)
-            .defer("embedding_vector", "overview")
+            .defer("overview")
         )
         _place_cache["food"] = list(
             Place.objects.filter(content_type_name="음식점")
             .filter(content_id__in=matrix_ids)
-            .defer("embedding_vector", "overview")
+            .defer("overview")
         )
     return _place_cache["general"], _place_cache["food"]
 
