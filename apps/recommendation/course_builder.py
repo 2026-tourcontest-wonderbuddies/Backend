@@ -148,6 +148,7 @@ def beam_search_day(
                 exclude_categories=exclude_categories,
                 get_travel_time_fn=get_travel_time_fn,
                 get_stay_time_fn=get_stay_time_fn,
+                mode=mode,
             )
 
             scored = [

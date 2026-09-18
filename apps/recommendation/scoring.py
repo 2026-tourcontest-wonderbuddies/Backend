@@ -12,6 +12,7 @@ Pipeline 5.2~5.3 — Micro 평가 (단일 장소 스코어링).
 스위치로 켜고 끌 수 있게 만들어둔다 (기본 off).
 """
 from __future__ import annotations
+import math
 
 from apps.recommendation.constraints import snap_to_15min, floor_to_15min
 
@@ -97,13 +98,32 @@ def calc_dwell_time(mode: str, pref: float, place) -> float:
     raise ValueError(f"알 수 없는 코스 모드: {mode}")
 
 
-def calc_cost_move(travel_min: float) -> float:
+def calc_cost_move(travel_min: float, mode: str = "dist", pref: float = 0.0) -> float:
     """
-    Pipeline 5.2-③ CostMove_R,k = TravelTime / 30 (30분을 비용 1.0으로 환산).
-    60분 초과 컷은 filters.py의 filter_candidates에서 이미 처리했으므로
-    여기서는 순수 계산만 한다.
+    이동시간 페널티.
+    dist: 선형
+    pref/relax: 로그 기반 완만한 곡선 + pref 점수가 높을수록 페널티 추가 완화
     """
-    return travel_min / 30.0
+    if mode == "dist":
+        FREE_THRESHOLD = 12
+        if travel_min <= FREE_THRESHOLD:
+            return 0.0 
+        return (travel_min - FREE_THRESHOLD) / 30.0
+
+
+    if travel_min <= 0:
+        return 0.0
+
+    # 로그 곡선: 5분 -> 작은값, 30분 -> 0.5 근처, 60분 -> 1.0 근처로 완만하게 수렴
+    # log(1 + t/10) 형태로 초반엔 완만, 갈수록 체감 증가폭 감소
+    base_cost = math.log(1 + travel_min / 10) / math.log(1 + 60 / 10)
+
+    if mode == "pref":
+        damping = 1 - (0.7 * pref)
+        return base_cost * damping
+
+    # relax는 완만한 로그곡선만 적용
+    return base_cost
 
 
 def calc_micro_score(
@@ -125,10 +145,7 @@ def calc_micro_score(
     elif mode == "pref":
         return 0.5 * pref + 0.4 * adjusted_qual - 0.1 * cost_move
     elif mode == "relax":
-        time_ratio = travel_min / remain_time_min if remain_time_min > 0 else 1.0
-        return 0.3 * pref + 0.4 * adjusted_qual - 0.3 * time_ratio
-    raise ValueError(f"알 수 없는 코스 모드: {mode}")
-
+        return 0.3 * pref + 0.4 * adjusted_qual - 0.3 * cost_move
     raise ValueError(f"알 수 없는 코스 모드: {mode}")
 
 
@@ -160,7 +177,7 @@ def score_candidate(
             stay_min = floor_to_15min(available)
 
     adjusted_qual = get_adjusted_qual(place)
-    cost_move = calc_cost_move(travel_min)
+    cost_move = calc_cost_move(travel_min, mode, pref)
     micro_score = calc_micro_score(
         mode, pref, adjusted_qual, cost_move, travel_min, stay_min, remain_time_min
     )

@@ -96,6 +96,7 @@ def filter_candidates(
     exclude_categories: list[str],
     get_travel_time_fn,      # routing_engine.get_travel_time을 감싼 콜러블 (아래 시그니처 참고)
     get_stay_time_fn,        # place.content_id -> stay_min(float)을 반환하는 콜러블
+    mode: str = "dist",
 ) -> list[dict]:
     """
     반환 dict에 "hours_uncertain" 추가 — course_builder가 최종 아이템에 표시 여부 전달용.
@@ -126,9 +127,11 @@ def filter_candidates(
         else:
             travel_min = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)
 
-        # 이동시간 60분 초과 시 사전 컷 (5.2-③ CostMove 주석: 단일 이동 60분 초과는 Micro 평가 전 컷)
-        if travel_min > 60:
-            continue
+        # 이동시간 60분 초과 시 사전 컷
+        if mode == "dist":
+            limit = 60
+            if travel_min > limit:   # ← 여기까지는 dist에서만 문제없음
+                continue
 
         # 체류시간 조회
         stay_min = get_stay_time_fn(place)
