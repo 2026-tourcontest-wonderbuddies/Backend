@@ -20,3 +20,15 @@ generate_all_courses 전체: 167.69초
 [dist] nlp_scores 계산: 1.37초
 [dist] 숙박 앵커 계산: 0.00초
 [dist] 전체 소요: 5.60초
+[dist] nlp_scores 계산: 0.00초
+[dist] 숙박 앵커 계산: 0.00초
+[dist] 전체 소요: 4.03초
+[pref] nlp_scores 계산: 0.00초
+[pref] 숙박 앵커 계산: 0.00초
+[pref] 전체 소요: 4.17초
+[relax] nlp_scores 계산: 0.00초
+[relax] 숙박 앵커 계산: 0.00초
+[relax] 전체 소요: 3.99초
+
+=== 전체 요청 ===
+generate_all_courses 전체: 12.21초

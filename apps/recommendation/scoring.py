@@ -105,9 +105,9 @@ def calc_cost_move(travel_min: float, mode: str = "dist", pref: float = 0.0) -> 
     pref/relax: 로그 기반 완만한 곡선 + pref 점수가 높을수록 페널티 추가 완화
     """
     if mode == "dist":
-        FREE_THRESHOLD = 12
+        FREE_THRESHOLD = 30
         if travel_min <= FREE_THRESHOLD:
-            return 0.0 
+            return (travel_min / FREE_THRESHOLD) * 0.3
         return (travel_min - FREE_THRESHOLD) / 30.0
 
 
