@@ -119,7 +119,7 @@ def _replay_day_timeline(day_obj, get_travel_time_fn) -> None:
     다시 계산해서 이어붙인다. 그래서 실제로 값이 밀리는 범위는 "교체 지점부터 다음 식사
     전까지"로 자연히 국한된다.
     """
-    items = list(day_obj.items.select_related("place").defer("place__embedding_vector").order_by("order"))
+    items = list(day_obj.items.select_related("place").order_by("order"))
     if not items:
         return
 
