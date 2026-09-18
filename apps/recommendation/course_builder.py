@@ -17,13 +17,14 @@ Pipeline 5.4~5.6 — 휴리스틱 빔서치 + Macro 평가로 하루치 코스�
 from __future__ import annotations
 from copy import deepcopy
 from apps.recommendation.filters import filter_candidates
-from apps.recommendation.scoring import score_candidate
+from apps.recommendation.scoring import score_candidate, is_popular_place
 from apps.recommendation.food_scoring import apply_relax_penalty
 
 
 BEAM_WIDTH = 10          # 5.4 유지 코스 수 (계산량 부담되면 5로 축소 가능, 구조는 동일)
 TOP_K_EXPAND = 5         # 매 단계 확장 후보 수
 SAFETY_CAP_SLOTS = 12
+POPULAR_QUOTA_RATIO = 0.25  # 일자별 동적 슬롯수의 20~30% 중 기본값. 튜닝 가능한 단순 상수.
 
 MACRO_WEIGHTS = {
     "dist":  {"pref": 0.20, "qual": 0.10, "move_eff": 0.70},
@@ -42,6 +43,7 @@ class PartialCourse:
         self.micro_scores = []          # SearchScore 계산용 누적치
         self.visited_ids = set()
         self.meal_filled = {"lunch": False, "dinner": False}
+        self.popular_count = 0          # 인기 장소 쿼터 달성 추적용
         if start_place:
             self.visited_ids.add(start_place.content_id)
 
@@ -53,6 +55,7 @@ class PartialCourse:
         new.micro_scores = list(self.micro_scores)
         new.visited_ids = set(self.visited_ids)
         new.meal_filled = dict(self.meal_filled)
+        new.popular_count = self.popular_count
         return new
 
     def add(self, scored_candidate: dict, slot_type: str = "GENERAL"):
@@ -70,6 +73,8 @@ class PartialCourse:
         self.current_place = place
         self.visited_ids.add(place.content_id)
         self.micro_scores.append(scored_candidate["micro_score"])
+        if is_popular_place(place):
+            self.popular_count += 1
         if slot_type == "RESTAURANT":
             if not self.meal_filled["lunch"]:
                 self.meal_filled["lunch"] = True
@@ -99,6 +104,7 @@ def beam_search_day(
     need_dinner: bool = False,
     visited_across_days: set[str] = None,
     nlp_match_score: float | None = None,
+    popular_quota: int = 0,
 ) -> list[PartialCourse]:
     """
     5.4 빔서치 본체. 완성 코스 최대 BEAM_WIDTH개를 반환한다.
@@ -117,8 +123,9 @@ def beam_search_day(
         def _done(b):
             slot_ok = len(b.items) >= target_slots
             meal_ok = (not need_lunch or b.meal_filled["lunch"]) and (not need_dinner or b.meal_filled["dinner"])
+            popular_ok = b.popular_count >= popular_quota
             hit_cap = len(b.items) >= SAFETY_CAP_SLOTS
-            return (slot_ok and meal_ok) or hit_cap
+            return (slot_ok and meal_ok and popular_ok) or hit_cap
 
         # 종료 조건: 목표 슬롯 수를 채웠거나, 모든 빔이 더 이상 확장 불가
         if all(_done(b) for b in beams):
@@ -150,6 +157,17 @@ def beam_search_day(
                 get_stay_time_fn=get_stay_time_fn,
                 mode=mode,
             )
+
+            # 인기 장소 쿼터 강제: 남은 슬롯 안에 쿼터를 못 채울 시점이 되면 후보를
+            # 인기 장소로만 제한한다. 그 안에서는 기존 micro_score(이동시간 포함)로
+            # 그대로 순위를 매기므로, 동선상 무리한 먼 인기 장소를 강제로 끼워넣지 않는다.
+            slots_left = target_slots - len(beam.items)
+            popular_left = max(popular_quota - beam.popular_count, 0)
+            if popular_left > 0 and popular_left >= slots_left:
+                popular_filtered = [c for c in filtered if is_popular_place(c["place"])]
+                if popular_filtered:
+                    filtered = popular_filtered
+                # 인기 후보가 아예 없으면(해당 권역/시간대에 매칭 데이터 없음) 강제하지 않고 진행
 
             scored = [
                 score_candidate(c, mode, purpose_main, purpose_sub, remain_time, nlp_match_score)
@@ -228,3 +246,45 @@ def select_best_course(courses: list[PartialCourse], avail_hours: float, mode: s
             best_course = course
 
     return best_course
+
+
+# ── 최소 동작 확인 (인기 장소 쿼터 강제) ──────────────────────
+if __name__ == "__main__":
+    class _DummyPlace:
+        def __init__(self, content_id, popularity_score=0.0, satisfaction_score=0.5):
+            self.content_id = content_id
+            self.title = content_id
+            self.popularity_score = popularity_score
+            self.quadrant = "SW"
+            self.hours_status = "always"
+            self.closed_weekdays = []
+            self.open_windows = {}
+            self.small_category_name = ""
+            self.middle_category_name = ""
+            self.parking = ""
+            self.satisfaction_score = satisfaction_score
+            self.stay_time_minutes = 60
+            self.stay_max = 90
+            self.latitude, self.longitude = 33.3, 126.5
+
+        def get_purpose_score(self, purpose_key):
+            return 100
+
+    start = _DummyPlace("start")
+    # 인기 장소는 만족도를 낮게 줘서, 강제 쿼터가 없으면 micro_score상 절대 안 뽑히게 만든다
+    # (그래도 쿼터 때문에 결과에 포함돼야 이 테스트가 강제 로직을 실제로 검증하는 것)
+    pool = [_DummyPlace(f"popular_{i}", popularity_score=0.9, satisfaction_score=0.1) for i in range(5)] + \
+           [_DummyPlace(f"normal_{i}", popularity_score=0.0, satisfaction_score=0.9) for i in range(5)]
+
+    beams = beam_search_day(
+        candidate_pool=pool, start_place=start, avail_hours=6.0, target_slots=4,
+        mode="pref", purpose_main="nature", purpose_sub=None, transport_mode="car",
+        region_quadrant="SW", exclude_place_ids=[], exclude_categories=[],
+        visit_start_datetime=__import__("datetime").datetime(2026, 1, 1, 9, 0),
+        get_travel_time_fn=lambda a, b, depart_at=None: {"duration_min_adjusted": 10},
+        get_stay_time_fn=lambda p: 30,
+        popular_quota=2,
+    )
+    best = max(beams, key=lambda b: b.search_score())
+    assert best.popular_count >= 2, f"쿼터 미달: popular_count={best.popular_count}"
+    print(f"인기 장소 쿼터 테스트 OK: 총 {len(best.items)}곳 중 인기 장소 {best.popular_count}곳")

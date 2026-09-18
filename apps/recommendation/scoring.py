@@ -98,6 +98,28 @@ def calc_dwell_time(mode: str, pref: float, place) -> float:
     raise ValueError(f"알 수 없는 코스 모드: {mode}")
 
 
+# 팀 문서(이동엔진/docs/08.03_AI Hub EDA)의 "인기 장소(10회+)" 기준과 동일하게,
+# obs_travel_n≈10 이상을 인기 장소로 본다. popularity_score = 1-exp(-0.2*obs_travel_n) 이므로
+# obs_travel_n=10 → 0.865. 0.85를 컷오프로 둔다.
+POPULAR_THRESHOLD = 0.85
+
+# ponytail: TourAPI 카테고리로는 진짜 명소(예: 오설록 티 뮤지엄)와 전국 어디에나
+# 있는 체인 매장이 같은 소분류("사후면세점" 등)로 묶여 있어 카테고리로 못 거른다.
+# obs_travel_n이 우연히 높게 잡힌 일부 전국구 체인만 이름으로 콕 집어 제외.
+# 새 체인이 인기 목록에서 눈에 띄면 여기 이름만 추가하면 됨(카테고리 재설계는 오버킬).
+CHAIN_RETAIL_DENYLIST = (
+    "이마트", "다이소", "올리브영", "탑텐", "GS25", "CU", "세븐일레븐",
+    "스타벅스", "투썸플레이스", "이디야", "파리바게뜨", "뚜레쥬르", "이니스프리",
+)
+
+
+def is_popular_place(place) -> bool:
+    """이 장소가 코스 내 '인기 장소' 쿼터에 해당하는지 여부. popularity_score가 없으면 False."""
+    if place.popularity_score is None or place.popularity_score < POPULAR_THRESHOLD:
+        return False
+    return not any(chain in place.title for chain in CHAIN_RETAIL_DENYLIST)
+
+
 def calc_cost_move(travel_min: float, mode: str = "dist", pref: float = 0.0) -> float:
     """
     이동시간 페널티.
@@ -204,3 +226,11 @@ if __name__ == "__main__":
     score_dist = calc_micro_score("dist", pref=0.8, adjusted_qual=0.7, cost_move=1.5,
                                    travel_min=45, stay_min=60, remain_time_min=300)
     print("동선효율 모드 Micro:", score_dist)
+
+    # is_popular_place 판정 확인
+    dummy = lambda score, title="테스트장소": type("Place", (), {"popularity_score": score, "title": title})()
+    assert is_popular_place(dummy(0.9)) is True
+    assert is_popular_place(dummy(0.5)) is False
+    assert is_popular_place(dummy(None)) is False
+    assert is_popular_place(dummy(0.99, "이마트 서귀포점")) is False  # 체인 매장 denylist
+    print("is_popular_place 판정: OK")
