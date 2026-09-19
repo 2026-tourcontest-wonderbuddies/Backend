@@ -69,6 +69,27 @@
    "open": "06:00",
    "close": "22:00",
    "obs": 1
+  },
+  {
+   "content_id": "404175",
+   "evidence": "hours",
+   "open": "06:10",
+   "close": "19:00",
+   "obs": 1
+  },
+  {
+   "content_id": "1868009",
+   "evidence": "hours",
+   "open": "06:30",
+   "close": "18:00",
+   "obs": 7
+  },
+  {
+   "content_id": "2840903",
+   "evidence": "hours",
+   "open": "06:30",
+   "close": "20:00",
+   "obs": 1
   }
  ],
  "morning": [
@@ -161,6 +182,186 @@
    "share": 0.391,
    "lift": 2.8,
    "score": 6.45
+  },
+  {
+   "content_id": "322836",
+   "evidence": "arrival",
+   "n": 8,
+   "total": 20,
+   "share": 0.4,
+   "lift": 2.81,
+   "score": 6.18
+  },
+  {
+   "content_id": "636266",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 5,
+   "share": 0.8,
+   "lift": 3.76,
+   "score": 6.06
+  },
+  {
+   "content_id": "3410530",
+   "evidence": "arrival",
+   "n": 9,
+   "total": 25,
+   "share": 0.36,
+   "lift": 2.62,
+   "score": 6.02
+  },
+  {
+   "content_id": "2843803",
+   "evidence": "arrival",
+   "n": 6,
+   "total": 13,
+   "share": 0.462,
+   "lift": 3.0,
+   "score": 5.83
+  },
+  {
+   "content_id": "1329201",
+   "evidence": "arrival",
+   "n": 5,
+   "total": 10,
+   "share": 0.5,
+   "lift": 3.05,
+   "score": 5.47
+  },
+  {
+   "content_id": "2714306",
+   "evidence": "arrival",
+   "n": 21,
+   "total": 97,
+   "share": 0.216,
+   "lift": 1.73,
+   "score": 5.35
+  },
+  {
+   "content_id": "2758924",
+   "evidence": "arrival",
+   "n": 3,
+   "total": 3,
+   "share": 1.0,
+   "lift": 3.69,
+   "score": 5.11
+  },
+  {
+   "content_id": "128555",
+   "evidence": "arrival",
+   "n": 12,
+   "total": 47,
+   "share": 0.255,
+   "lift": 1.98,
+   "score": 5.08
+  },
+  {
+   "content_id": "2860731",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 7,
+   "share": 0.571,
+   "lift": 3.14,
+   "score": 5.05
+  },
+  {
+   "content_id": "2767629",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 7,
+   "share": 0.571,
+   "lift": 3.14,
+   "score": 5.05
+  },
+  {
+   "content_id": "126435",
+   "evidence": "arrival",
+   "n": 28,
+   "total": 154,
+   "share": 0.182,
+   "lift": 1.47,
+   "score": 4.95
+  },
+  {
+   "content_id": "976820",
+   "evidence": "arrival",
+   "n": 5,
+   "total": 12,
+   "share": 0.417,
+   "lift": 2.69,
+   "score": 4.83
+  },
+  {
+   "content_id": "130512",
+   "evidence": "arrival",
+   "n": 8,
+   "total": 28,
+   "share": 0.286,
+   "lift": 2.13,
+   "score": 4.68
+  },
+  {
+   "content_id": "2807124",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 8,
+   "share": 0.5,
+   "lift": 2.9,
+   "score": 4.66
+  },
+  {
+   "content_id": "2839730",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 8,
+   "share": 0.5,
+   "lift": 2.9,
+   "score": 4.66
+  },
+  {
+   "content_id": "4083815",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 8,
+   "share": 0.5,
+   "lift": 2.9,
+   "score": 4.66
+  },
+  {
+   "content_id": "1973369",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 8,
+   "share": 0.5,
+   "lift": 2.9,
+   "score": 4.66
+  },
+  {
+   "content_id": "127052",
+   "evidence": "arrival",
+   "n": 7,
+   "total": 23,
+   "share": 0.304,
+   "lift": 2.22,
+   "score": 4.61
+  },
+  {
+   "content_id": "992261",
+   "evidence": "arrival",
+   "n": 3,
+   "total": 4,
+   "share": 0.75,
+   "lift": 3.28,
+   "score": 4.54
+  },
+  {
+   "content_id": "2851868",
+   "evidence": "arrival",
+   "n": 3,
+   "total": 4,
+   "share": 0.75,
+   "lift": 3.28,
+   "score": 4.54
   }
  ],
  "midday": [
@@ -253,6 +454,186 @@
    "share": 0.722,
    "lift": 1.37,
    "score": 5.04
+  },
+  {
+   "content_id": "2714241",
+   "evidence": "arrival",
+   "n": 53,
+   "total": 81,
+   "share": 0.654,
+   "lift": 1.25,
+   "score": 5.0
+  },
+  {
+   "content_id": "126472",
+   "evidence": "arrival",
+   "n": 41,
+   "total": 61,
+   "share": 0.672,
+   "lift": 1.28,
+   "score": 4.78
+  },
+  {
+   "content_id": "2048059",
+   "evidence": "arrival",
+   "n": 41,
+   "total": 61,
+   "share": 0.672,
+   "lift": 1.28,
+   "score": 4.78
+  },
+  {
+   "content_id": "130461",
+   "evidence": "arrival",
+   "n": 23,
+   "total": 28,
+   "share": 0.821,
+   "lift": 1.5,
+   "score": 4.77
+  },
+  {
+   "content_id": "2808037",
+   "evidence": "arrival",
+   "n": 28,
+   "total": 38,
+   "share": 0.737,
+   "lift": 1.38,
+   "score": 4.64
+  },
+  {
+   "content_id": "126452",
+   "evidence": "arrival",
+   "n": 33,
+   "total": 49,
+   "share": 0.673,
+   "lift": 1.28,
+   "score": 4.5
+  },
+  {
+   "content_id": "591798",
+   "evidence": "arrival",
+   "n": 21,
+   "total": 27,
+   "share": 0.778,
+   "lift": 1.43,
+   "score": 4.41
+  },
+  {
+   "content_id": "598696",
+   "evidence": "arrival",
+   "n": 14,
+   "total": 15,
+   "share": 0.933,
+   "lift": 1.61,
+   "score": 4.35
+  },
+  {
+   "content_id": "2931892",
+   "evidence": "arrival",
+   "n": 26,
+   "total": 37,
+   "share": 0.703,
+   "lift": 1.32,
+   "score": 4.35
+  },
+  {
+   "content_id": "2606298",
+   "evidence": "arrival",
+   "n": 28,
+   "total": 41,
+   "share": 0.683,
+   "lift": 1.29,
+   "score": 4.34
+  },
+  {
+   "content_id": "2836855",
+   "evidence": "arrival",
+   "n": 21,
+   "total": 28,
+   "share": 0.75,
+   "lift": 1.38,
+   "score": 4.28
+  },
+  {
+   "content_id": "126465",
+   "evidence": "arrival",
+   "n": 33,
+   "total": 52,
+   "share": 0.635,
+   "lift": 1.21,
+   "score": 4.27
+  },
+  {
+   "content_id": "3080468",
+   "evidence": "arrival",
+   "n": 22,
+   "total": 30,
+   "share": 0.733,
+   "lift": 1.36,
+   "score": 4.27
+  },
+  {
+   "content_id": "2806871",
+   "evidence": "arrival",
+   "n": 14,
+   "total": 16,
+   "share": 0.875,
+   "lift": 1.53,
+   "score": 4.14
+  },
+  {
+   "content_id": "2740014",
+   "evidence": "arrival",
+   "n": 26,
+   "total": 40,
+   "share": 0.65,
+   "lift": 1.23,
+   "score": 4.06
+  },
+  {
+   "content_id": "127053",
+   "evidence": "arrival",
+   "n": 22,
+   "total": 32,
+   "share": 0.688,
+   "lift": 1.29,
+   "score": 4.04
+  },
+  {
+   "content_id": "2851125",
+   "evidence": "arrival",
+   "n": 12,
+   "total": 13,
+   "share": 0.923,
+   "lift": 1.57,
+   "score": 4.03
+  },
+  {
+   "content_id": "127050",
+   "evidence": "arrival",
+   "n": 12,
+   "total": 13,
+   "share": 0.923,
+   "lift": 1.57,
+   "score": 4.03
+  },
+  {
+   "content_id": "2801936",
+   "evidence": "arrival",
+   "n": 11,
+   "total": 12,
+   "share": 0.917,
+   "lift": 1.55,
+   "score": 3.85
+  },
+  {
+   "content_id": "127862",
+   "evidence": "arrival",
+   "n": 21,
+   "total": 32,
+   "share": 0.656,
+   "lift": 1.23,
+   "score": 3.82
   }
  ],
  "sunset": [
@@ -345,6 +726,186 @@
    "share": 0.529,
    "lift": 2.01,
    "score": 4.62
+  },
+  {
+   "content_id": "127813",
+   "evidence": "arrival",
+   "n": 29,
+   "total": 93,
+   "share": 0.312,
+   "lift": 1.34,
+   "score": 4.55
+  },
+  {
+   "content_id": "2899545",
+   "evidence": "arrival",
+   "n": 25,
+   "total": 77,
+   "share": 0.325,
+   "lift": 1.39,
+   "score": 4.52
+  },
+  {
+   "content_id": "2853621",
+   "evidence": "arrival",
+   "n": 18,
+   "total": 50,
+   "share": 0.36,
+   "lift": 1.52,
+   "score": 4.46
+  },
+  {
+   "content_id": "2910854",
+   "evidence": "arrival",
+   "n": 13,
+   "total": 32,
+   "share": 0.406,
+   "lift": 1.66,
+   "score": 4.39
+  },
+  {
+   "content_id": "2792565",
+   "evidence": "arrival",
+   "n": 12,
+   "total": 29,
+   "share": 0.414,
+   "lift": 1.68,
+   "score": 4.32
+  },
+  {
+   "content_id": "2738665",
+   "evidence": "arrival",
+   "n": 16,
+   "total": 45,
+   "share": 0.356,
+   "lift": 1.49,
+   "score": 4.23
+  },
+  {
+   "content_id": "2564158",
+   "evidence": "arrival",
+   "n": 16,
+   "total": 47,
+   "share": 0.34,
+   "lift": 1.44,
+   "score": 4.07
+  },
+  {
+   "content_id": "2714241",
+   "evidence": "arrival",
+   "n": 23,
+   "total": 81,
+   "share": 0.284,
+   "lift": 1.22,
+   "score": 3.88
+  },
+  {
+   "content_id": "228853",
+   "evidence": "arrival",
+   "n": 20,
+   "total": 69,
+   "share": 0.29,
+   "lift": 1.24,
+   "score": 3.79
+  },
+  {
+   "content_id": "2752730",
+   "evidence": "arrival",
+   "n": 16,
+   "total": 51,
+   "share": 0.314,
+   "lift": 1.33,
+   "score": 3.78
+  },
+  {
+   "content_id": "1621077",
+   "evidence": "arrival",
+   "n": 16,
+   "total": 51,
+   "share": 0.314,
+   "lift": 1.33,
+   "score": 3.78
+  },
+  {
+   "content_id": "2782858",
+   "evidence": "arrival",
+   "n": 9,
+   "total": 22,
+   "share": 0.409,
+   "lift": 1.64,
+   "score": 3.77
+  },
+  {
+   "content_id": "2877801",
+   "evidence": "arrival",
+   "n": 5,
+   "total": 8,
+   "share": 0.625,
+   "lift": 2.06,
+   "score": 3.69
+  },
+  {
+   "content_id": "1918639",
+   "evidence": "arrival",
+   "n": 20,
+   "total": 71,
+   "share": 0.282,
+   "lift": 1.21,
+   "score": 3.69
+  },
+  {
+   "content_id": "2930935",
+   "evidence": "arrival",
+   "n": 15,
+   "total": 48,
+   "share": 0.312,
+   "lift": 1.33,
+   "score": 3.68
+  },
+  {
+   "content_id": "2831635",
+   "evidence": "arrival",
+   "n": 14,
+   "total": 45,
+   "share": 0.311,
+   "lift": 1.32,
+   "score": 3.57
+  },
+  {
+   "content_id": "2742307",
+   "evidence": "arrival",
+   "n": 6,
+   "total": 12,
+   "share": 0.5,
+   "lift": 1.83,
+   "score": 3.56
+  },
+  {
+   "content_id": "2767884",
+   "evidence": "arrival",
+   "n": 13,
+   "total": 41,
+   "share": 0.317,
+   "lift": 1.34,
+   "score": 3.53
+  },
+  {
+   "content_id": "2808937",
+   "evidence": "arrival",
+   "n": 9,
+   "total": 26,
+   "share": 0.346,
+   "lift": 1.43,
+   "score": 3.28
+  },
+  {
+   "content_id": "2811459",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 6,
+   "share": 0.667,
+   "lift": 2.04,
+   "score": 3.28
   }
  ],
  "night": [
@@ -437,6 +998,186 @@
    "share": 0.778,
    "lift": 4.39,
    "score": 9.12
+  },
+  {
+   "content_id": "2893659",
+   "evidence": "arrival",
+   "n": 5,
+   "total": 5,
+   "share": 1.0,
+   "lift": 4.53,
+   "score": 8.12
+  },
+  {
+   "content_id": "2851686",
+   "evidence": "arrival",
+   "n": 11,
+   "total": 24,
+   "share": 0.458,
+   "lift": 3.23,
+   "score": 8.03
+  },
+  {
+   "content_id": "2851674",
+   "evidence": "arrival",
+   "n": 6,
+   "total": 8,
+   "share": 0.75,
+   "lift": 4.11,
+   "score": 7.99
+  },
+  {
+   "content_id": "2755000",
+   "evidence": "arrival",
+   "n": 7,
+   "total": 12,
+   "share": 0.583,
+   "lift": 3.61,
+   "score": 7.51
+  },
+  {
+   "content_id": "2863719",
+   "evidence": "arrival",
+   "n": 7,
+   "total": 13,
+   "share": 0.538,
+   "lift": 3.41,
+   "score": 7.1
+  },
+  {
+   "content_id": "2759608",
+   "evidence": "arrival",
+   "n": 11,
+   "total": 29,
+   "share": 0.379,
+   "lift": 2.76,
+   "score": 6.85
+  },
+  {
+   "content_id": "2791433",
+   "evidence": "arrival",
+   "n": 5,
+   "total": 7,
+   "share": 0.714,
+   "lift": 3.78,
+   "score": 6.76
+  },
+  {
+   "content_id": "2755458",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 4,
+   "share": 1.0,
+   "lift": 4.14,
+   "score": 6.66
+  },
+  {
+   "content_id": "4068781",
+   "evidence": "arrival",
+   "n": 8,
+   "total": 19,
+   "share": 0.421,
+   "lift": 2.9,
+   "score": 6.36
+  },
+  {
+   "content_id": "129401",
+   "evidence": "arrival",
+   "n": 12,
+   "total": 39,
+   "share": 0.308,
+   "lift": 2.31,
+   "score": 5.93
+  },
+  {
+   "content_id": "126460",
+   "evidence": "arrival",
+   "n": 7,
+   "total": 17,
+   "share": 0.412,
+   "lift": 2.79,
+   "score": 5.81
+  },
+  {
+   "content_id": "2755444",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 6,
+   "share": 0.667,
+   "lift": 3.39,
+   "score": 5.45
+  },
+  {
+   "content_id": "2854417",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 6,
+   "share": 0.667,
+   "lift": 3.39,
+   "score": 5.45
+  },
+  {
+   "content_id": "2759061",
+   "evidence": "arrival",
+   "n": 5,
+   "total": 10,
+   "share": 0.5,
+   "lift": 3.02,
+   "score": 5.41
+  },
+  {
+   "content_id": "3071816",
+   "evidence": "arrival",
+   "n": 6,
+   "total": 15,
+   "share": 0.4,
+   "lift": 2.67,
+   "score": 5.19
+  },
+  {
+   "content_id": "1882201",
+   "evidence": "arrival",
+   "n": 3,
+   "total": 3,
+   "share": 1.0,
+   "lift": 3.65,
+   "score": 5.06
+  },
+  {
+   "content_id": "2876704",
+   "evidence": "arrival",
+   "n": 3,
+   "total": 3,
+   "share": 1.0,
+   "lift": 3.65,
+   "score": 5.06
+  },
+  {
+   "content_id": "2479639",
+   "evidence": "arrival",
+   "n": 3,
+   "total": 3,
+   "share": 1.0,
+   "lift": 3.65,
+   "score": 5.06
+  },
+  {
+   "content_id": "128555",
+   "evidence": "arrival",
+   "n": 12,
+   "total": 47,
+   "share": 0.255,
+   "lift": 1.96,
+   "score": 5.02
+  },
+  {
+   "content_id": "2844094",
+   "evidence": "arrival",
+   "n": 4,
+   "total": 7,
+   "share": 0.571,
+   "lift": 3.1,
+   "score": 5.0
   }
  ]
 }

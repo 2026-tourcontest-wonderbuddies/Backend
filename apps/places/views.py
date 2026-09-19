@@ -85,7 +85,7 @@ def _period_places():
 
 class PeriodPlacesView(APIView):
     """
-    GET /api/places/by-period/?period=night&limit=10 — 시간대별 장소
+    GET /api/places/by-period/?period=night&limit=30 — 시간대별 장소
 
     아침/낮/노을/밤은 AI Hub 실측 도착시각(evidence="arrival"),
     새벽은 영업·개방 시간(evidence="hours")이 근거다.
@@ -100,13 +100,13 @@ class PeriodPlacesView(APIView):
             )
 
         try:
-            limit = int(request.query_params.get("limit", 10))
+            limit = int(request.query_params.get("limit", 30))
         except ValueError:
             return Response(
                 {"error": "limit은 정수여야 합니다."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        limit = max(1, min(limit, 10))
+        limit = max(1, min(limit, 30))
 
         rows = _period_places()[period][:limit]
         places = Place.objects.in_bulk([r["content_id"] for r in rows])
