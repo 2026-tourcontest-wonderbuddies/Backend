@@ -137,6 +137,7 @@ class Command(BaseCommand):
                     satisfaction_score=self._to_float_or_none(row.get("satisfaction_score", "")),
                     satisfaction_src=row.get("satisfaction_src", ""),
                     popularity_score=self._to_float_or_none(row.get("popularity_score", "")),
+                    is_night_spot=row.get("is_night_spot", "").strip().lower() == "true",
                 ),
             )
         except Exception as e:

@@ -128,6 +128,10 @@ class Place(models.Model):
         null=True, blank=True,
         help_text="AI_Hub obs_travel_n 기반 인기도 = 1-exp(-0.2*obs_travel_n). 미관측 시 0.0"
     )
+    is_night_spot = models.BooleanField(
+        default=False,
+        help_text="AI_Hub 실측 야간 명소(20시 이후 도착 비율). scripts/merge_night_spot_into_places_csv.py가 CSV에 채움"
+    )
 
     class Meta:
         indexes = [

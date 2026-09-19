@@ -3,6 +3,7 @@
 그때그때 생성)와는 완전히 별개다. 여기 모델들은 미리 골라둔 장소 조합을 그냥 보여주는
 용도라서, 이동시간·체류시간·숙박 등 알고리즘 쪽 로직을 전혀 갖지 않는다.
 """
+from django.conf import settings
 from django.db import models
 from apps.places.models import Place
 
@@ -41,3 +42,14 @@ class CuratedCourseItem(models.Model):
 
     def __str__(self):
         return f"{self.course_id}-{self.order}: {self.place.title}"
+
+
+class SavedCuratedCourse(models.Model):
+    """사용자가 하트로 저장한 추천 코스. 장소 저장(SavedPlace)과 같은 구조다."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="saved_curated_courses")
+    course = models.ForeignKey(CuratedCourse, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "course")
+        ordering = ["-created_at"]
