@@ -251,14 +251,14 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         segment_minutes = [end - start for start, end in tour_segments]   # ★ 각 구간의 실제 길이(분) 계산
         general_chunk_targets = _split_by_time_ratio(general_target, segment_minutes) if tour_segments else []
 
-        # 인기 장소 쿼터: 일자별 동적 슬롯수(target_slots)의 20~30%(기본 25%)를
+        # 인기 장소 쿼터: 일자별 관광 슬롯수(general_target)의 50%를
         # 일반(관광지) 슬롯 안에서 강제 확보한다. 구간 배분은 관광 목표 개수와 동일하게
         # 시간 비율로 나누고, 각 구간의 실제 목표 개수를 넘지 않도록 캡을 건다.
-        popular_quota_total = min(round(target_slots * POPULAR_QUOTA_RATIO), general_target)
+        popular_quota_total = round(general_target * POPULAR_QUOTA_RATIO)
         general_popular_quotas = _split_by_time_ratio(popular_quota_total, segment_minutes) if tour_segments else []
         general_popular_quotas = [min(q, t) for q, t in zip(general_popular_quotas, general_chunk_targets)]
 
-        # 음식 슬롯도 동일한 방식으로 인기 맛집 쿼터 적용 (일자별 식사 슬롯 수의 25%).
+        # 음식 슬롯도 동일한 방식으로 인기 맛집 쿼터 적용 (일자별 식사 슬롯 수의 50%).
         # round()면 식사가 1~2개인 흔한 케이스가 전부 0으로 내림돼 쿼터가 무력화되므로,
         # 식사가 1개 이상이면 최소 1곳은 보장되도록 ceil(올림) 사용 — 팀 합의 사항.
         food_popular_quota = math.ceil(meal_count * POPULAR_QUOTA_RATIO)
