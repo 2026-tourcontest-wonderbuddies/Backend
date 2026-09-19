@@ -5,6 +5,8 @@ from django.shortcuts import render
 API 뷰. 알고리즘(engine.py) 호출은 여기서만 하고, 뷰 자체는 최대한 얇게 유지.
 """
 
+from datetime import datetime, timedelta
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -19,7 +21,8 @@ from apps.recommendation.engine import generate_all_courses
 from apps.recommendation.engine_provider import get_routing_engine
 from apps.nlp.modification_interpreter import parse_modification_request, generate_result_explanation
 from apps.recommendation.course_modifier import (
-    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment, recalc_first_and_last_item_travel
+    recalc_timeline_from, resequence_orders, regenerate_unlocked_segment, recalc_first_and_last_item_travel,
+    KST,
 )
 
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
