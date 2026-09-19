@@ -42,7 +42,16 @@ PURPOSE_TO_SCORE_FIELD = {
     "culture": "score_culture", "activity": "score_activity", "shopping": "score_shopping",
 }
 
-REASON_PROMPT = "장소의 특징 점수와 소개글을 참고해서, 왜 이 장소가 추천됐는지 자연스러운 한 문장으로 설명하세요."
+REASON_PROMPT = """장소의 특징 점수와 소개글을 참고해서, 왜 이 장소가 추천됐는지
+자연스러운 한 문장으로 설명하세요.
+
+- 장소 이름으로 문장을 시작하지 마세요. 그 장소의 특징이나 매력 포인트로 문장을 시작하세요.
+- "~로 추천됩니다"처럼 끝내지 마세요. "~하기 좋은 곳입니다", "~을 만끽할 수 있습니다"처럼
+  자연스럽게 마무리하세요.
+- 특징 한 가지만 나열하지 말고, 두 가지를 자연스럽게 이어서 설명하세요.
+  예: "~을 즐길 수 있어, ~도 함께 느낄 수 있는 곳입니다", "~이 있는 곳으로, ~도 인상적입니다".
+- 반드시 문장 하나로만 끝내세요. "또한", "그리고" 등으로 이어서 두 번째 문장을 새로 만들지
+  마세요. 마침표는 문장 끝에 한 번만 나와야 합니다."""
 
 def generate_place_recommend_reason(place, purpose_main: str, purpose_sub: Optional[str]) -> str:
     """
