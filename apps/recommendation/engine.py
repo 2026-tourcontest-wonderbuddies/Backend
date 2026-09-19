@@ -6,7 +6,7 @@ from apps.places.models import Place
 from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, ItineraryItem
 from apps.recommendation.constraints import (
     calc_avail_hours_from_schedule, calc_target_slots, estimate_airport_travel_min,
-    snap_travel_time_5min, get_meal_windows
+    snap_travel_time_5min, get_meal_windows, ADJACENT_QUADRANTS
 )
 from apps.recommendation.course_builder import (
     beam_search_day, select_best_course, calc_macro_score, POPULAR_QUOTA_RATIO,
@@ -28,6 +28,7 @@ LUNCH_TARGET_MIN = 12 * 60
 DINNER_TARGET_MIN = 19 * 60
 
 MIN_LEFTOVER_TO_RECORD = 20
+NIGHT_TAIL_MIN = 60   # 야간 명소 뒤에 이만큼 이상 남으면 일반 후보로 더 채운다
 
 # 캐싱
 _place_cache = {"general": None, "food": None}
@@ -45,6 +46,18 @@ def _get_cached_places(matrix_ids):
             .defer("overview")
         )
     return _place_cache["general"], _place_cache["food"]
+
+
+def _night_pool(all_general_places, quadrant, visited):
+    """야간 명소 후보. 사용자 권역 → (비면) 인접 권역 순. 그래도 없으면 빈 리스트."""
+    night = [p for p in all_general_places if p.is_night_spot and p.content_id not in visited]
+    if not quadrant:
+        return night
+    for allowed in ({quadrant}, {quadrant} | ADJACENT_QUADRANTS.get(quadrant, set())):
+        pool = [p for p in night if p.quadrant in allowed]
+        if pool:
+            return pool
+    return []
 
 
 def _get_travel_time_fn(routing_engine):
@@ -216,7 +229,10 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         )
         meal_count = len(meal_segments)
 
-        target_slots = calc_target_slots(avail.avail_hours, mode, avail.need_night_spot)
+        # 야간 후보가 없으면 야간 슬롯(+1)도 만들지 않는다.
+        night_pool = _night_pool(all_general_places, quadrant, visited_across_days) if avail.need_night_spot else []
+        need_night = bool(night_pool)
+        target_slots = calc_target_slots(avail.avail_hours, mode, need_night)
         general_target = max(target_slots - meal_count, 0)
 
         # 관광구간 경계 계산 (식사 구간을 뺀 나머지)
@@ -268,7 +284,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             avail_hours=avail.avail_hours, target_slots=target_slots,
             avail_start_min=avail.avail_start_min,
             need_morning=avail.need_morning, need_lunch=avail.need_lunch,
-            need_dinner=avail.need_dinner, need_night_spot=avail.need_night_spot,
+            need_dinner=avail.need_dinner, need_night_spot=need_night,
         )
 
         meal_candidates, relaxed_ids = build_meal_candidates(
@@ -281,20 +297,35 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         order = 0
         day_meal_records = []   # 인기 맛집 재조정용 — 하루치 식사 선택 기록 (아래 for 루프 끝난 뒤 처리)
 
+        last_tour_event = next((e for e in reversed(events) if e[0] == "tour"), None)
         for event in events:
             if event[0] == "tour":
                 _, seg_start, seg_end, chunk_target, chunk_popular_quota = event
                 seg_start_dt = day_start_kst.replace(hour=seg_start // 60, minute=seg_start % 60)
-                chunk_avail_hours = max(0.0, (seg_end - seg_start) / 60)
+                seg_end_dt = day_start_kst.replace(hour=seg_end // 60, minute=seg_end % 60)
 
-                best_chunk = _run_general_chunk(
-                    all_general_places, current_place, chunk_avail_hours, chunk_target, mode,
-                    day_purpose_main, day_purpose_sub, day_exclude,
-                    quadrant, seg_start_dt, get_travel_time_fn, get_stay_time_fn,
-                    visited_across_days, nlp_scores, popular_quota=chunk_popular_quota,
-                )
+                # 저녁 이후 마지막 구간: 야간 명소 1곳을 먼저 시도하고, 못 넣었거나 시간이 남으면
+                # 같은 구간을 일반 후보로 채운다(야간 명소가 안 맞아도 구간이 비지 않게).
+                is_night_seg = need_night and event is last_tour_event
+                passes = [("night", night_pool, None, 1, 0)] if is_night_seg else []
+                passes.append((
+                    "general", all_general_places, quadrant,
+                    max(chunk_target, 1) if is_night_seg else chunk_target, chunk_popular_quota,
+                ))
+
                 current_time = seg_start_dt
-                if best_chunk:
+                for kind, pass_places, pass_quadrant, pass_target, pass_quota in passes:
+                    remain_min = (seg_end_dt - current_time).total_seconds() / 60
+                    if kind == "general" and is_night_seg and remain_min < NIGHT_TAIL_MIN:
+                        break
+                    best_chunk = _run_general_chunk(
+                        pass_places, current_place, max(0.0, remain_min) / 60, pass_target, mode,
+                        day_purpose_main, day_purpose_sub, day_exclude,
+                        pass_quadrant, current_time, get_travel_time_fn, get_stay_time_fn,
+                        visited_across_days, nlp_scores, popular_quota=min(pass_quota, pass_target),
+                    )
+                    if not best_chunk:
+                        continue
                     for item in best_chunk.items:
                         if order == 0:
                             travel_min = snap_travel_time_5min(
