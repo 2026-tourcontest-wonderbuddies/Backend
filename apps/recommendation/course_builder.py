@@ -24,7 +24,7 @@ from apps.recommendation.food_scoring import apply_relax_penalty
 BEAM_WIDTH = 10          # 5.4 유지 코스 수 (계산량 부담되면 5로 축소 가능, 구조는 동일)
 TOP_K_EXPAND = 5         # 매 단계 확장 후보 수
 SAFETY_CAP_SLOTS = 12
-POPULAR_QUOTA_RATIO = 0.25  # 일자별 동적 슬롯수의 20~30% 중 기본값. 튜닝 가능한 단순 상수.
+POPULAR_QUOTA_RATIO = 0.5  # 일자별 동적 슬롯수 대비 인기 장소 강제 확보 비율. 튜닝 가능한 단순 상수.
 
 MACRO_WEIGHTS = {
     "dist":  {"pref": 0.20, "qual": 0.10, "move_eff": 0.70},
