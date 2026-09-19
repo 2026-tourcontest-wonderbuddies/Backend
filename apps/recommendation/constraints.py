@@ -31,6 +31,11 @@ DINNER_WINDOW = (18 * 60, 20 * 60)
 STAY_GRID_MIN = 15
 HALLASAN_LAT = 33.3617
 HALLASAN_LNG = 126.5292
+# 야간 명소 권역 폴백용. 변을 맞댄 쌍만 인접으로 본다(대각선 NE-SW, NW-SE 제외).
+ADJACENT_QUADRANTS = {
+    "NE": {"NW", "SE"}, "NW": {"NE", "SW"},
+    "SE": {"NE", "SW"}, "SW": {"NW", "SE"},
+}
 JEJU_AIRPORT_LAT = 33.5104
 JEJU_AIRPORT_LNG = 126.4914
 JEJU_AIRPORT_PROXY_CONTENT_ID = "2929823" # 올리브영 제주국제공항점
@@ -80,9 +85,7 @@ def check_meal_flags(start_min: int, end_min: int) -> tuple[bool, bool, bool]:
 
 
 def check_night_spot_flag(end_min: int) -> bool:
-    if end_min < DAY_END_ANCHOR:
-        return False
-    return (end_min - DINNER_WINDOW[1]) >= 60
+    return end_min > DAY_END_ANCHOR
 
 
 def calc_avail_hours_from_schedule(day_index, total_days, day_start_kst, day_end_kst) -> DayAvailability:
@@ -95,7 +98,8 @@ def calc_avail_hours_from_schedule(day_index, total_days, day_start_kst, day_end
     day_case = "D" if total_days == 1 else ("A" if day_index == 1 else ("C" if day_index == total_days else "B"))
 
     need_morning, need_lunch, need_dinner = check_meal_flags(start_min, end_min)
-    need_night = check_night_spot_flag(end_min)
+    # 출도일(C·D)의 종료 시각은 공항 도착 시각이라 야간 슬롯을 추가하지 않는다.
+    need_night = day_case not in ("C", "D") and check_night_spot_flag(end_min)
     target_slots = calc_target_slots(avail_hours, mode="pref", need_night_spot=need_night)
 
     return DayAvailability(
