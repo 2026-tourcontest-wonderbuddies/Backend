@@ -2,6 +2,7 @@
 API 입출력 스키마. TripRequest 입력 검증 + 결과(코스/장소/숙소) 직렬화.
 """
 
+import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,8 @@ from rest_framework import serializers
 from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, ItineraryItem
 from apps.places.models import Place, Lodging
 from apps.recommendation.constraints import estimate_airport_travel_min, snap_travel_time_5min
+
+logger = logging.getLogger(__name__)
 
 KST = ZoneInfo("Asia/Seoul")
 DEFAULT_VEHICLE = "car"
@@ -65,7 +68,13 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
         purpose_main = override.get("purpose_main", trip.purpose_main) if override else trip.purpose_main
         purpose_sub = override.get("purpose_sub", trip.purpose_sub) if override else trip.purpose_sub
 
-        return generate_place_recommend_reason(obj.place, purpose_main, purpose_sub)
+        try:
+            return generate_place_recommend_reason(obj.place, purpose_main, purpose_sub)
+        except Exception:
+            # 추천 이유는 표시용 문구다. LLM이 막혀도(일일 한도 등) 코스 조회까지 죽이지 않는다.
+            # 프론트는 recommend_reason이 없으면 장소 소개로 대체한다.
+            logger.warning("recommend_reason 생성 실패 (item=%s)", obj.id, exc_info=True)
+            return None
 
 # 일정 상세 정보
 class ItineraryDaySerializer(serializers.ModelSerializer):
