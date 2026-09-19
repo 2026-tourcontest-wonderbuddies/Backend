@@ -27,7 +27,8 @@ DB_CSVS = [BASE / "data" / "jeju_places_stay_time.csv",
 
 PERIODS = ["dawn", "morning", "midday", "sunset", "night"]
 ARRIVAL_PERIODS = ["morning", "midday", "sunset", "night"]
-TOP_N = 10
+TOP_N = 30
+MIN_ROWS = 10      # 새벽처럼 조건을 통과하는 곳이 TOP_N보다 적은 시간대도 있다
 MIN_N = 3          # 시간대별 최소 관측 수
 MIN_LIFT = 1.2     # 그 시간대 쏠림이 전체 평균보다 20% 이상
 SMOOTH_K = 5.0     # 전역 사전확률로 끌어당기는 강도
@@ -161,7 +162,7 @@ def check(result):
 
     for period in PERIODS:
         rows = result[period]
-        assert len(rows) == TOP_N, f"{period}: {len(rows)}곳 (기대 {TOP_N})"
+        assert MIN_ROWS <= len(rows) <= TOP_N, f"{period}: {len(rows)}곳 (기대 {MIN_ROWS}~{TOP_N})"
 
         want = "hours" if period == "dawn" else "arrival"
         assert all(r["evidence"] == want for r in rows), f"{period}: evidence 불일치"
@@ -177,7 +178,7 @@ def check(result):
         len({r["content_id"] for r in result[a]} & {r["content_id"] for r in result[b]})
         for i, a in enumerate(PERIODS) for b in PERIODS[i + 1:]
     )
-    assert overlap <= 4, f"카드 간 중복 {overlap}건 (기대 4건 이하)"
+    assert overlap <= 15, f"카드 간 중복 {overlap}건 (기대 15건 이하)"
 
 
 if __name__ == "__main__":
