@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 
 from apps.trips.models import TripRequest, RecommendedCourse, ItineraryDay, ItineraryItem
 from apps.trips.serializers import (
@@ -22,7 +23,7 @@ from apps.recommendation.engine_provider import get_routing_engine
 from apps.nlp.modification_interpreter import parse_modification_request, generate_result_explanation
 from apps.recommendation.course_modifier import (
     recalc_timeline_from, resequence_orders, regenerate_unlocked_segment, recalc_first_and_last_item_travel,
-    KST,
+    replace_meal_place, KST,
 )
 
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
@@ -164,35 +165,61 @@ class CourseModifyView(APIView):
         before_summary = {"total_places": sum(d.items.count() for d in course.days.all())}
         affected_days = []
 
-        if scope == "full":
-            # 전면 재추천 — 기존 것 지우고 generate_one_course 재사용
-            from apps.recommendation.engine import generate_one_course
-            from apps.recommendation.engine_provider import get_routing_engine
-            course.days.all().delete()
-            new_course = generate_one_course(course.trip, get_routing_engine(), course.mode)
-            course.final_score = new_course.final_score
-            new_course.days.all().update(course=course)
-            new_course.delete()
-            affected_days = [d.day_index for d in course.days.all()]
-        else:
-            # 부분 재계산 — 이름으로 장소 매칭해서 고정/삭제 표시 후, 미고정 구간만 재탐색
-            for day in course.days.all():
-                changed = False
-                for item in day.items.all():
-                    if item.place.title in locked_names and not item.locked:
-                        item.locked = True
-                        item.save(update_fields=["locked"])
-                        changed = True
-                    if item.place.title in removed_names:
-                        item.delete()
-                        changed = True
-                if changed:
-                    from apps.recommendation.course_modifier import resequence_orders
-                    resequence_orders(day)
-                    regenerate_unlocked_segment(
-                        day, day.course.trip.purpose_main, day.course.trip.purpose_sub, course.mode
-                    )
-                    affected_days.append(day.day_index)
+        # 삭제/고정과 재계산은 한 묶음이다. 묶지 않으면 재계산이 터졌을 때
+        # 장소만 지워지고 시각은 그대로인 반쪽 코스가 DB에 남는다.
+        with transaction.atomic():
+            if scope == "full":
+                # 전면 재추천 — 기존 것 지우고 generate_one_course 재사용
+                from apps.recommendation.engine import generate_one_course
+                from apps.recommendation.engine_provider import get_routing_engine
+                course.days.all().delete()
+                new_course = generate_one_course(course.trip, get_routing_engine(), course.mode)
+                course.final_score = new_course.final_score
+                new_course.days.all().update(course=course)
+                new_course.delete()
+                affected_days = [d.day_index for d in course.days.all()]
+            else:
+                # 교체할 때 이 코스가 이미 쓰고 있는 곳이 다시 뽑히지 않게 미리 모아둔다.
+                used_ids = {i.place.content_id for d in course.days.all() for i in d.items.all()}
+                # 부분 재계산 — 이름으로 장소 매칭해서 고정/삭제 표시 후, 미고정 구간만 재탐색
+                for day in course.days.all():
+                    changed = False
+                    # 뺀 곳을 다시 뽑지 않도록 재탐색에 넘길 목록.
+                    replaced_ids = set()
+                    for item in day.items.all():
+                        if item.place.title in locked_names and not item.locked:
+                            item.locked = True
+                            item.save(update_fields=["locked"])
+                            changed = True
+                        if item.place.title in removed_names:
+                            if item.slot_type == "GENERAL":
+                                # 자리는 남겨둔 채로 재탐색에 맡긴다. 여기서 지워버리면
+                                # 재탐색이 채울 자리 자체가 사라져 장소 수가 줄어든다.
+                                # 사용자가 "빼달라"고 한 이상 고정은 풀어야 대상이 된다.
+                                if item.locked:
+                                    item.locked = False
+                                    item.save(update_fields=["locked"])
+                                replaced_ids.add(item.place.content_id)
+                            else:
+                                # 식사 슬롯은 관광지 후보 풀로 못 채운다 — 같은 시간대에 문 연
+                                # 다른 식당을 따로 찾아 갈아 끼우고, 못 찾으면 그냥 뺀다.
+                                if replace_meal_place(
+                                    item, day.course.trip.purpose_main, day.course.trip.purpose_sub,
+                                    course.mode, exclude_ids=used_ids,
+                                ):
+                                    # 한 요청에서 식당을 둘 이상 빼면 같은 곳이 두 번 뽑힐 수 있다.
+                                    used_ids.add(item.place.content_id)
+                                else:
+                                    item.delete()
+                            changed = True
+                    if changed:
+                        from apps.recommendation.course_modifier import resequence_orders
+                        resequence_orders(day)
+                        regenerate_unlocked_segment(
+                            day, day.course.trip.purpose_main, day.course.trip.purpose_sub, course.mode,
+                            extra_exclude_ids=replaced_ids or None,
+                        )
+                        affected_days.append(day.day_index)
 
         after_summary = {"total_places": sum(d.items.count() for d in course.days.all())}
         explanation = generate_result_explanation(raw_message, before_summary, after_summary)
