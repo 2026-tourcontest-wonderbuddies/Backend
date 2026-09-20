@@ -28,6 +28,9 @@ MORNING_TARGET_MIN = 8 * 60
 LUNCH_TARGET_MIN = 12 * 60
 DINNER_TARGET_MIN = 19 * 60
 
+# 마지막 날 공항 직전 식사: 공항 이동시간을 빼고도 이 이상은 남아야 후보로 인정한다.
+MIN_AIRPORT_MEAL_STAY_MIN = 30
+
 MIN_LEFTOVER_TO_RECORD = 20
 NIGHT_TAIL_MIN = 60   # 야간 명소 뒤에 이만큼 이상 남으면 일반 후보로 더 채운다
 
@@ -613,6 +616,25 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 if not role_candidates:
                     continue
 
+                # 마지막 날 하루 중 가장 마지막 이벤트(뒤에 공항 복귀만 남는 식사)인 경우,
+                # 공항까지 이동시간을 빼고도 최소 체류시간(MIN_AIRPORT_MEAL_STAY_MIN)이
+                # 안 나오는 후보는 애초에 배제한다 — 그런 후보만 남으면, 체류시간을
+                # 억지로 몇 분까지 깎느니 공항에서 제일 가까운 곳 하나로 좁힌다.
+                is_last_day = (day_index == total_days)
+                is_airport_critical = is_last_day and event is events[-1]
+                if is_airport_critical:
+                    reachable = [
+                        p for p in role_candidates
+                        if slot_duration_min - snap_travel_time_5min(
+                            estimate_airport_travel_min(p.latitude, p.longitude, DEFAULT_VEHICLE)
+                        ) >= MIN_AIRPORT_MEAL_STAY_MIN
+                    ]
+                    role_candidates = reachable if reachable else [
+                        min(role_candidates, key=lambda p: estimate_airport_travel_min(
+                            p.latitude, p.longitude, DEFAULT_VEHICLE
+                        ))
+                    ]
+
                 prev_place = current_place   # 재조정 시 이동시간 재계산 기준점으로 기록해둠
                 if order == 0 or current_place is None:
                     chosen_place = role_candidates[0]
@@ -633,6 +655,19 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                     travel_min = snap_travel_time_5min(chosen["travel_min"])
                     is_relaxed = chosen.get("is_relaxed", False)
 
+                # 식사 윈도우 폭(slot_duration_min)을 그대로 쓰면 공항까지 갈 시간이 전혀
+                # 확보되지 않는다. 이 식당 위치 기준 공항 이동시간을 구해 종료시각을
+                # 넘기는 만큼만 체류시간에서 깎는다(장소별 stay_time_minutes와는 무관).
+                if is_airport_critical:
+                    travel_to_airport = snap_travel_time_5min(
+                        estimate_airport_travel_min(chosen_place.latitude, chosen_place.longitude, DEFAULT_VEHICLE)
+                    )
+                    overrun_min = (
+                        meal_start_dt + timedelta(minutes=slot_duration_min + travel_to_airport) - day_end_kst
+                    ).total_seconds() / 60
+                    if overrun_min > 0:
+                        slot_duration_min = max(slot_duration_min - overrun_min, 0)
+
                 arrive = meal_start_dt   # ★ 이동시간과 무관하게 시간대 시작에 정확히 고정
                 depart = meal_start_dt + timedelta(minutes=slot_duration_min)
 
@@ -644,11 +679,15 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 )
                 # 인기 맛집 쿼터는 그 자리에서(마지막 슬롯이라고) 강제하지 않는다 — 하루치 식사를
                 # 전부 자연스럽게 고른 뒤, 아래서 "그중 인기 점수가 가장 낮은 슬롯"을 골라 교체한다.
-                day_meal_records.append({
-                    "item": meal_item, "prev_place": prev_place,
-                    "role_candidates": role_candidates, "meal_start_dt": meal_start_dt,
-                    "slot_duration_min": slot_duration_min, "relaxed_ids": active_relaxed_ids,
-                })
+                # ★ 공항 직전 마지막 식사는 재조정 대상에서 제외 — 교체는 place/travel_min만
+                # 갱신하고 위에서 깎은 stay_min은 그대로 두기 때문에, 재조정으로 더 먼 식당이
+                # 들어오면 방금 맞춰둔 공항 마감시간이 다시 깨진다.
+                if not is_airport_critical:
+                    day_meal_records.append({
+                        "item": meal_item, "prev_place": prev_place,
+                        "role_candidates": role_candidates, "meal_start_dt": meal_start_dt,
+                        "slot_duration_min": slot_duration_min, "relaxed_ids": active_relaxed_ids,
+                    })
                 visited_across_days.add(chosen_place.content_id)
                 current_place = chosen_place
                 order += 1
