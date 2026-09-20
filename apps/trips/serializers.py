@@ -69,7 +69,13 @@ class ItineraryItemSerializer(serializers.ModelSerializer):
         purpose_sub = override.get("purpose_sub", trip.purpose_sub) if override else trip.purpose_sub
 
         try:
-            return generate_place_recommend_reason(obj.place, purpose_main, purpose_sub)
+            return generate_place_recommend_reason(
+                obj.place, purpose_main, purpose_sub,
+                arrive_at=obj.arrive_at, travel_min=obj.travel_min_from_prev,
+                is_relaxed=obj.is_relaxed_preference,
+                food_pref_1=trip.food_pref_1, food_pref_2=trip.food_pref_2,
+                free_text=trip.free_text_input, cafe_balance=trip.food_cafe_balance,
+            )
         except Exception:
             # 추천 이유는 표시용 문구다. LLM이 막혀도(일일 한도 등) 코스 조회까지 죽이지 않는다.
             # 프론트는 recommend_reason이 없으면 장소 소개로 대체한다.
