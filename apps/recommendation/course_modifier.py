@@ -217,7 +217,7 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
             # 이동시간은 갱신하되, 시각은 시간대 고정 유지 (arrive_at은 그대로 둠)
             item.travel_min_from_prev = travel_min
             item.save(update_fields=["travel_min_from_prev"])
-            current_time = item.depart_at  # 다음 항목 계산을 위해 시간만 이어받음
+            current_time = item.depart_at.astimezone(KST)  # 다음 항목 계산을 위해 시간만 이어받음
         else:
             current_time += timedelta(minutes=travel_min)
             item.arrive_at = current_time
