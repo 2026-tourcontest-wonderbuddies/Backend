@@ -237,7 +237,6 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
 
     get_travel_time_fn = _get_travel_time_fn(routing_engine)
     get_stay_time_fn = lambda p: p.stay_time_minutes
-    nlp_scores = calc_nlp_match_scores(trip.free_text_input)
 
     course = RecommendedCourse.objects.create(trip=trip, mode=mode)
     visited_across_days: set[str] = set()
