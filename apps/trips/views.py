@@ -38,10 +38,13 @@ class TripRequestCreateView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
+            # trip 저장만 별도의 트랜잭션으로 — 이 블록이 끝나면 100% 커밋됨
             with transaction.atomic():
                 trip = serializer.save(user=request.user if request.user.is_authenticated else None)
-                routing_engine = get_routing_engine()
-                courses = generate_all_courses(trip, routing_engine)
+
+            # 이 시점부터는 trip이 확실히 DB에 커밋된 상태 — 병렬 스레드도 안전하게 조회 가능
+            routing_engine = get_routing_engine()
+            courses = generate_all_courses(trip, routing_engine)
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
