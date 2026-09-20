@@ -12,12 +12,13 @@ from apps.recommendation.course_builder import (
     beam_search_day, select_best_course, calc_macro_score, POPULAR_QUOTA_RATIO,
 )
 from apps.recommendation.food_scoring import build_meal_candidates, build_morning_meal_candidates, decide_food_slot_types, score_food_candidates, filter_food_candidates
-from apps.recommendation.lodging_adapter import get_lodging_anchor
+from apps.recommendation.lodging_adapter import get_lodging_anchor, warmup_recommender
 from apps.recommendation.nlp_matching import calc_nlp_match_scores
 from apps.recommendation.filters import is_open_at
 from apps.recommendation.scoring import is_popular_place
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 KST = ZoneInfo("Asia/Seoul")
 MODES = ["dist", "pref", "relax"]
@@ -218,15 +219,21 @@ def _replay_day_timeline(day_obj, get_travel_time_fn) -> None:
 
 
 def generate_all_courses(trip: TripRequest, routing_engine) -> list[RecommendedCourse]:
-    return [generate_one_course(trip, routing_engine, mode) for mode in MODES]
+    # 병렬 실행 전에 캐시를 미리 채워서 race condition 방지
+    matrix_ids = set(routing_engine._pos.keys())
+    _get_cached_places(matrix_ids)
+    warmup_recommender() 
+    
+    # 3개 모드 추천 병렬 수행
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = [executor.submit(generate_one_course, trip, routing_engine, mode) for mode in MODES]
+        return [f.result() for f in futures]
 
 
 def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> RecommendedCourse:
     t_start = time.time()
 
     nlp_scores = calc_nlp_match_scores(trip.free_text_input)
-    with open("debug_log.txt", "a") as f:
-        f.write(f"[{mode}] nlp_scores 계산: {time.time()-t_start:.2f}초\n")
 
     day_schedules = sorted(trip.day_schedules, key=lambda d: d["day_index"])
     total_days = len(day_schedules)
@@ -244,6 +251,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
     current_start_place = None
     day_last_place_ids: list[str] = []
     total_final_score = 0.0
+    pending_items = []
 
     for schedule in day_schedules:
         day_index = schedule["day_index"]
@@ -577,12 +585,12 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                         # ★ 추가 식당/카페 슬롯은 인기 맛집 재조정 대상(day_meal_records)에
                         # 넣지 않는다 — 고정 식사와 달리 시간이 흘러가는 방식이라, 재조정으로
                         # 교체되면 이동시간이 달라져 다음 식사시간과 겹칠 수 있기 때문이다.
-                        ItineraryItem.objects.create(
+                        pending_items.append(ItineraryItem(
                             day=day_obj, order=order, place=item["place"], slot_type="GENERAL",
                             arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
                             hours_uncertain=item.get("hours_uncertain", False),
                             is_relaxed_preference=item.get("_is_relaxed", False),
-                        )
+                        ))
                         visited_across_days.add(item["place"].content_id)
                         current_place = item["place"]
                         order += 1
@@ -702,14 +710,15 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
         ) if order else {}
         total_final_score += macro_result.get("final_score", 0)
 
+    if pending_items:
+        ItineraryItem.objects.bulk_create(pending_items)
+
     expected_nights = total_days - 1
     t_lodging = time.time()
     if len(day_last_place_ids) == expected_nights and day_last_place_ids:
         lodging_cards = get_lodging_anchor(trip, day_last_place_ids)
     else:
         lodging_cards = []
-    with open("debug_log.txt", "a") as f:
-        f.write(f"[{mode}] 숙박 앵커 계산: {time.time()-t_lodging:.2f}초\n")
 
     for day in course.days.exclude(day_index=total_days):
         day.lodging_options_snapshot = lodging_cards
@@ -717,8 +726,5 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
 
     course.final_score = total_final_score / total_days if total_days else 0
     course.save(update_fields=["final_score"])
-
-    with open("debug_log.txt", "a") as f:
-        f.write(f"[{mode}] 전체 소요: {time.time()-t_start:.2f}초\n")
 
     return course

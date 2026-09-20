@@ -38,6 +38,8 @@ def _get_recommender():
 def _to_date_str(dt) -> str:
     return dt.strftime("%Y-%m-%d")
 
+def warmup_recommender():
+    _get_recommender()
 
 def get_lodging_anchor(
     trip,                          # apps.trips.models.TripRequest 인스턴스

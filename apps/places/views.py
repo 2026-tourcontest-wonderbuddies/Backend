@@ -13,6 +13,7 @@ from apps.places.models import Place
 from apps.nlp.rag_qa import answer_place_question
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from apps.places.tour_api import fetch_place_realtime_info
 
 # Create your views here.
 class PlaceSaveView(APIView):
