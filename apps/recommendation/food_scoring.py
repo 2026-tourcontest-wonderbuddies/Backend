@@ -11,6 +11,7 @@
 : 음식점/카페 전용 필터링 + 점수 로직
 """
 from __future__ import annotations
+import math
 from apps.places.models import Place
 from apps.recommendation.scoring import get_purpose_match, get_adjusted_qual, calc_cost_move, calc_micro_score, calc_dwell_time
 from apps.recommendation.constraints import estimate_airport_travel_min, floor_to_15min
@@ -76,9 +77,11 @@ def filter_food_candidates(
     food_pref_2: str,
     food_restriction: str,
     is_open_at_fn,
+    require_breakfast_suitable: bool = False,
 ) -> tuple[list[Place], list[str]]:
     """
     §1.1 필수필터 + §1.2 식사제한 + food_tags 매칭.
+    require_breakfast_suitable=True면 breakfast_suitable=True인 곳만 통과시킨다(아침 슬롯 전용).
     """
     strict_prefs = [p for p in (food_pref_1, food_pref_2) if p]
     survivors = []
@@ -92,6 +95,8 @@ def filter_food_candidates(
         if not passes_food_restriction(place, food_restriction):
             continue
         if not matches_food_pref_tags(place, strict_prefs):
+            continue
+        if require_breakfast_suitable and not place.breakfast_suitable:
             continue
         survivors.append(place)
 
@@ -130,6 +135,50 @@ def build_meal_candidates(
         food_pref_1="", food_pref_2="",
         food_restriction=food_restriction,
         is_open_at_fn=is_open_at_fn,
+    )
+
+    strict_ids = {p.content_id for p in strict_candidates}
+    relaxed_ids = {p.content_id for p in relaxed_candidates if p.content_id not in strict_ids}
+
+    combined = strict_candidates + [p for p in relaxed_candidates if p.content_id in relaxed_ids]
+    return combined, relaxed_ids
+
+
+def build_morning_meal_candidates(
+    all_food_places: list[Place],
+    quadrant: str,
+    visit_datetime,
+    food_pref_1: str,
+    food_pref_2: str,
+    food_restriction: str,
+    is_open_at_fn,
+) -> tuple[list[Place], set[str]]:
+    """
+    ★ 아침 식사 전용 후보 조회. build_meal_candidates()와 같은 2단계 구조를 쓰되,
+    두 단계 모두 breakfast_suitable=True는 항상 유지한다(권역·식사제한도 항상 유지) —
+    부족할 때만 선호 음식 태그 조건을 뺀다.
+
+    1단계(엄격): 권역+영업중+식사제한+선호음식+breakfast_suitable=True
+    2단계(완화, 1단계가 SOFT_FILTER_MIN_MEAL_CANDIDATES 미만이면): 선호음식만 제거
+
+    Returns:
+        (최종 후보 리스트, 완화로 추가된 place_id 집합)
+    """
+    strict_candidates, strict_prefs = filter_food_candidates(
+        all_food_places, quadrant, visit_datetime, food_pref_1, food_pref_2,
+        food_restriction, is_open_at_fn, require_breakfast_suitable=True,
+    )
+
+    meal_capable_strict = [p for p in strict_candidates if is_meal_place(p)]
+    if len(meal_capable_strict) >= SOFT_FILTER_MIN_MEAL_CANDIDATES:
+        return strict_candidates, set()
+
+    # 완화: 선호태그 조건만 제거 (권역·식사제한·breakfast_suitable=True는 그대로 유지)
+    relaxed_candidates, _ = filter_food_candidates(
+        all_food_places, quadrant, visit_datetime,
+        food_pref_1="", food_pref_2="",
+        food_restriction=food_restriction,
+        is_open_at_fn=is_open_at_fn, require_breakfast_suitable=True,
     )
 
     strict_ids = {p.content_id for p in strict_candidates}
@@ -233,32 +282,38 @@ def score_food_candidates(
     return scored
 
 
-def decide_food_slot_types(purpose_selected, need_morning, need_lunch, need_dinner, avail_hours, cafe_balance):
-    """기존과 동일 로직 유지 (문서상 변경 없음)."""
-    slots = []
-    if need_morning:
-        slots.append("RESTAURANT")
-    if need_lunch:
-        slots.append("RESTAURANT")
-    if need_dinner:
-        slots.append("RESTAURANT")
-    if not purpose_selected:
-        return slots
+def decide_food_slot_types(is_main: bool, general_target: int, cafe_balance: str) -> list[str]:
+    """
+    식당/카페가 목적(주 또는 보조)으로 선택됐을 때, 관광 슬롯(general_target) 안에서
+    몇 곳을 식당/카페 "추가 슬롯"으로 채울지 + 무슨 타입으로 채울지 결정한다.
 
-    extra_count = 1 if avail_hours < 6 else 2
+    개수는 general_target(그날 관광용 슬롯 수, 식사 슬롯 제외)에 비례해서 정한다 —
+    시간이 짧아지면 자동으로 개수도 줄어들게(고정 개수 하드코딩 X).
+    주목적이면 항상 절반 이상(ceil), 보조목적이면 항상 그보다 적게(약 30%, floor) —
+    "주목적이면 식당/카페가 일반 장소보다 많거나 같아야 한다"는 원칙을 항상 만족시킴.
+    아침/점심/저녁 고정 식사 슬롯(RESTAURANT/SNACK)은 이 함수가 아니라 기존
+    meal_segments 로직이 별도로 채우므로 여기서는 다루지 않는다.
+    """
+    if general_target <= 0:
+        return []
+
+    extra_count = math.ceil(general_target / 2) if is_main else int(general_target * 0.3)
+    extra_count = min(extra_count, general_target)
+    if extra_count <= 0:
+        return []
+
     if cafe_balance == "음식점중심":
-        extra_types = ["RESTAURANT", "SNACK"][:extra_count]
+        pattern = ["RESTAURANT", "SNACK"]
     elif cafe_balance == "카페중심":
-        extra_types = ["CAFE"] * extra_count
+        pattern = ["CAFE"]
     else:
-        pattern = ["RESTAURANT", "CAFE"]
-        extra_types = [pattern[i % 2] for i in range(extra_count)]
+        pattern = ["CAFE", "RESTAURANT"]
 
-    slots.extend(extra_types)
-    return slots
+    return [pattern[i % len(pattern)] for i in range(extra_count)]
 
 
 # ── 최소 동작 확인 ──────────────────────────────────────────
 if __name__ == "__main__":
     print(calc_purpose_fit(80, 80))  # 92.8
-    print(decide_food_slot_types(True, True, False, 8.0, "둘다"))
+    print(decide_food_slot_types(True, 5, "둘다"))
+    print(decide_food_slot_types(False, 5, "둘다"))

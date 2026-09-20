@@ -26,12 +26,12 @@ _recommender = None
 def _get_recommender():
     global _recommender
     if _recommender is None:
-        print("🔴 새로 생성 중...")
+        print("새로 생성 중...")
         start = time.time()
         _recommender = LodgingRecommender(embedder=OpenAIEmbedder())
-        print(f"🔴 생성 완료: {time.time()-start:.2f}초")
+        print(f"생성 완료: {time.time()-start:.2f}초")
     else:
-        print("✅ 캐시 재사용")
+        print("캐시 재사용")
     return _recommender
 
 # ★ accommodations 계약(§L0)이 요구하는 형식: 'YYYY-MM-DD'
