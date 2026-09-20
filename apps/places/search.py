@@ -1,3 +1,4 @@
+from django.db.models import F
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import serializers
@@ -19,7 +20,7 @@ class PlaceSearchSerializer(serializers.ModelSerializer):
 
 
 class PlaceSearchView(APIView):
-    """GET /api/places/search/?q=&category=&region=&page=&page_size= — 장소 검색(이름/유형/권역)"""
+    """GET /api/places/search/?q=&category=&region=&sort=&page=&page_size= — 장소 검색(이름/유형/권역)"""
 
     def get(self, request):
         q = request.query_params.get("q", "").strip()
@@ -45,7 +46,8 @@ class PlaceSearchView(APIView):
             qs = qs.filter(quadrant=region)
 
         if sort == "popular":
-            qs = qs.order_by("-popularity_score", "title")   # 인기도 높은 순, 동점이면 이름순
+            # 미관측 장소는 popularity_score가 null이라 뒤로 보낸다.
+            qs = qs.order_by(F("popularity_score").desc(nulls_last=True), "title")
         else:
             qs = qs.order_by("title")
         total = qs.count()
