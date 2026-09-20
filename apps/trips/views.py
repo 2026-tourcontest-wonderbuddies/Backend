@@ -86,7 +86,13 @@ class CourseSelectView(APIView):
 class CourseDetailView(APIView):
     def get(self, request, course_id):
         # 시리얼라이저가 trip.start_datetime/end_datetime을 타므로 같이 당겨온다.
-        course = get_object_or_404(RecommendedCourse.objects.select_related("trip"), id=course_id)
+        course = get_object_or_404(
+            RecommendedCourse.objects
+            .select_related("trip")
+            .prefetch_related("days__items__place__images"),   # ★ 추가
+            id=course_id
+        )        
+                
         return Response(RecommendedCourseSerializer(course).data)
 
 
