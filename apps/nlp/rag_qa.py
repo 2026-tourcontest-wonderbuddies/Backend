@@ -17,13 +17,21 @@ def answer_place_question(content_id: str, question: str) -> str:
 
     context = (
         f"장소명: {place.title}\n"
+        f"주소: {place.address}\n"
         f"분류: {place.content_type_name} / {place.small_category_name}\n"
         f"소개: {place.overview}\n"
         f"운영시간: {place.hours_raw}\n"
         f"휴무일: {place.closed_days_raw}\n"
         f"요금: {place.fees}\n"
         f"주차: {place.parking}\n"
+        f"화장실: {place.restroom}\n"
         f"연락처: {place.contact}\n\n"
+        f"홈페이지 주소: {place.homepage}\n"
+        f"카드 사용 가능 여부: {place.credit_card}\n"
+        f"상세 정보: {place.detail_information}\n"
+        f"소개글: {place.overview}\n"
+        f"장 서는 날: {place.market_days}\n"
+        f"판매 물품: {place.sale_items}\n"
         f"질문: {question}"
     )
 
