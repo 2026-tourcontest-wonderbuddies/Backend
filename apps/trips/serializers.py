@@ -43,7 +43,7 @@ class PlaceSummarySerializer(serializers.ModelSerializer):
         model = Place
         fields = ["content_id", "title", "content_type_name", "small_category_name", "address",
                   "latitude", "longitude", "overview", "contact", "hours_raw", "closed_days_raw",
-                  "fees", "parking", "menu", "featured_menu", "stay_time_minutes"]
+                  "fees", "parking", "menu", "featured_menu", "stay_time_minutes", "food_role"]
 
 class ItineraryItemSerializer(serializers.ModelSerializer):
     place = PlaceSummarySerializer(read_only=True)
