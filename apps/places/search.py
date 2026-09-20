@@ -25,6 +25,7 @@ class PlaceSearchView(APIView):
         q = request.query_params.get("q", "").strip()
         category = request.query_params.get("category", "").strip()
         region = request.query_params.get("region", "").strip()
+        sort = request.query_params.get("sort", "").strip()
 
         try:
             page = max(int(request.query_params.get("page", 1)), 1)
@@ -43,7 +44,10 @@ class PlaceSearchView(APIView):
         if region in dict(Place.QUADRANT_CHOICES):
             qs = qs.filter(quadrant=region)
 
-        qs = qs.order_by("title")
+        if sort == "popular":
+            qs = qs.order_by("-popularity_score", "title")   # 인기도 높은 순, 동점이면 이름순
+        else:
+            qs = qs.order_by("title")
         total = qs.count()
         start = (page - 1) * page_size
         results = qs[start:start + page_size]
