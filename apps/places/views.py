@@ -13,6 +13,7 @@ from apps.places.models import Place
 from apps.nlp.rag_qa import answer_place_question
 from rest_framework import status
 from django.shortcuts import get_object_or_404
+from apps.places.tour_api import fetch_place_realtime_info
 
 # Create your views here.
 class PlaceSaveView(APIView):
@@ -42,8 +43,20 @@ class PlaceDetailView(APIView):
     """
 
     def get(self, request, content_id):
-        place = get_object_or_404(Place, content_id=content_id)
-        return Response(PlaceDetailSerializer(place).data)
+        try:
+            place = Place.objects.get(content_id=content_id)
+        except Place.DoesNotExist:
+            return Response({"error": "장소를 찾을 수 없습니다"}, status=404)
+
+        data = PlaceDetailSerializer(place).data
+
+        # 실시간 정보로 덮어쓰기 시도 (5개 필드만)
+        realtime = fetch_place_realtime_info(place.content_id, place.content_type_id)
+        if realtime:
+            data.update(realtime)
+        # 실패 시 realtime이 빈 dict라 data는 그대로(DB에 저장된 기존 값 유지)
+
+        return Response(data)
 
 
 class PlaceAskView(APIView):

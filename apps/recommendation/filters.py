@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 from datetime import datetime, timedelta
-from apps.recommendation.constraints import estimate_airport_travel_min
+from apps.recommendation.constraints import estimate_airport_travel_min, JEJU_AIRPORT_PROXY_CONTENT_ID
 
 
 WEEKDAY_MAP = ["월", "화", "수", "목", "금", "토", "일"]
@@ -84,6 +84,27 @@ def check_time_budget(
     """
     return (travel_min + stay_min) <= remain_time_min
 
+def check_airport_deadline(
+    place,
+    arrival_and_stay_end_dt:datetime,
+    airport_deadline_dt: datetime,
+    matrix_ids: set,
+    get_travel_time_fn,
+    transport_mode: str,
+) -> bool:
+    """
+    마지막날 전용. 이후보를 방문하고나서 공항까지 갈 시간까지 확보되는지 확인
+    제주공항 매트릭스로 실측 이동시간을 조회한다.
+    """
+    if place.content_id in matrix_ids and JEJU_AIRPORT_PROXY_CONTENT_ID in matrix_ids:
+        result = get_travel_time_fn(place.content_id, JEJU_AIRPORT_PROXY_CONTENT_ID, depart_at=arrival_and_stay_end_dt)
+        travel_to_airport = result["duration_min_adjusted"]
+    else:
+        travel_to_airport = estimate_airport_travel_min(place.latitude, place.longitude, transport_mode)
+
+    airport_arrival = arrival_and_stay_end_dt + timedelta(minutes=travel_to_airport)
+    return airport_arrival <= airport_deadline_dt
+
 
 def filter_candidates(
     current_place,           # 현재 위치의 Place 인스턴스 (None이면 출발지 좌표 사용은 course_builder가 처리)
@@ -97,6 +118,8 @@ def filter_candidates(
     get_travel_time_fn,      # routing_engine.get_travel_time을 감싼 콜러블 (아래 시그니처 참고)
     get_stay_time_fn,        # place.content_id -> stay_min(float)을 반환하는 콜러블
     mode: str = "dist",
+    airport_deadline_dt: datetime | None = None, # 마지막날에만 전달됨
+    matrix_ids: set | None = None,  # airport_deadline_dt와 함께 필요
 ) -> list[dict]:
     """
     반환 dict에 "hours_uncertain" 추가 — course_builder가 최종 아이템에 표시 여부 전달용.
@@ -139,6 +162,14 @@ def filter_candidates(
         # 가용시간 충족 여부
         if not check_time_budget(travel_min, stay_min, remain_time_min):
             continue
+
+        if airport_deadline_dt is not None:
+            arrival_and_stay_end = visit_datetime + timedelta(minutes=travel_min + stay_min)
+            if not check_airport_deadline(
+                place, arrival_and_stay_end, airport_deadline_dt,
+                matrix_ids or set(), get_travel_time_fn, transport_mode,
+            ):
+                continue 
 
         survivors.append({
             "place": place,

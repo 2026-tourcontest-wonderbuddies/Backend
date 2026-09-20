@@ -106,10 +106,8 @@ def recalc_first_and_last_item_travel(course) -> None:
                     day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
                 )
                 arrive_at = day_start + timedelta(minutes=travel_min_in)
+                stay_duration = first_item.stay_min if first_item.stay_min is not None else first_item.place.stay_time_minutes
                 depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
-            
-            arrive_at = day_start + timedelta(minutes=travel_min_in)
-            depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
 
             first_item.travel_min_from_prev = travel_min_in
             first_item.arrive_at = arrive_at
@@ -217,12 +215,13 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
             # 이동시간은 갱신하되, 시각은 시간대 고정 유지 (arrive_at은 그대로 둠)
             item.travel_min_from_prev = travel_min
             item.save(update_fields=["travel_min_from_prev"])
-            current_time = item.depart_at  # 다음 항목 계산을 위해 시간만 이어받음
+            current_time = item.depart_at.astimezone(KST)  # 다음 항목 계산을 위해 시간만 이어받음
         else:
             current_time += timedelta(minutes=travel_min)
             item.arrive_at = current_time
             item.travel_min_from_prev = travel_min
-            current_time += timedelta(minutes=item.place.stay_time_minutes)
+            stay_duration = item.stay_min if item.stay_min is not None else item.place.stay_time_minutes
+            current_time += timedelta(minutes=stay_duration)
             item.depart_at = current_time
             item.save(update_fields=["arrive_at", "depart_at", "travel_min_from_prev"])
 
@@ -307,7 +306,7 @@ def regenerate_unlocked_segment(day: ItineraryDay, purpose_main: str, purpose_su
     )
 
     first_unlocked_order = unlocked_items[0].order
-    filled = []   # [(order, place)] — 비운 자리를 그대로 재사용한다
+    filled = []   # [(order, place, stay_min)] — 비운 자리를 그대로 재사용한다
 
     for group, prev_kept, next_kept in segments:
         start_place = prev_kept.place if prev_kept else None
@@ -332,18 +331,21 @@ def regenerate_unlocked_segment(day: ItineraryDay, purpose_main: str, purpose_su
         if not best:
             continue
         for item, chunk_item in zip(group, best.items):
-            filled.append((item.order, chunk_item["place"]))
+            filled.append((item.order, chunk_item["place"], chunk_item["stay_min"]))
             # 뒤 구간이 같은 곳을 또 고르지 않게 누적한다.
             exclude_ids.add(chunk_item["place"].content_id)
 
     for it in unlocked_items:
         it.delete()
 
-    for order, place in filled:
+    for order, place, stay_min in filled:
         ItineraryItem.objects.create(
             day=day, order=order, place=place, slot_type="GENERAL",
             arrive_at=day_start, depart_at=day_start,   # 임시값, 아래에서 재계산으로 확정
             travel_min_from_prev=0,
+            # 빔서치가 고른 체류시간을 그대로 보관한다. recalc_timeline_from이
+            # place.stay_time_minutes 대신 이 값을 우선 쓴다.
+            stay_min=stay_min,
         )
 
     resequence_orders(day)
