@@ -167,6 +167,8 @@ class ItineraryItem(models.Model):
         default=False,
         help_text="선호 음식 태그 조건이 완화되어 선택된 항목인지 (문서 §소프트필터-4 투명성)"
     )
+    # 생성 시점에 확정된 체류시간(분), 모드별 calc_dwell_time() 결과를 그대로 보존
+    stay_min = models.IntegerField(null=True, blank=True)
 
     class Meta:
         ordering = ["day", "order"]
