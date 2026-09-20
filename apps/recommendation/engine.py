@@ -588,6 +588,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                         pending_items.append(ItineraryItem(
                             day=day_obj, order=order, place=item["place"], slot_type="GENERAL",
                             arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
+                            stay_min=item["stay_min"],
                             hours_uncertain=item.get("hours_uncertain", False),
                             is_relaxed_preference=item.get("_is_relaxed", False),
                         ))
@@ -638,6 +639,7 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                 meal_item = ItineraryItem.objects.create(
                     day=day_obj, order=order, place=chosen_place, slot_type="RESTAURANT",
                     arrive_at=arrive, depart_at=depart, travel_min_from_prev=travel_min,
+                    stay_min=slot_duration_min,
                     is_relaxed_preference=is_relaxed,
                 )
                 # 인기 맛집 쿼터는 그 자리에서(마지막 슬롯이라고) 강제하지 않는다 — 하루치 식사를

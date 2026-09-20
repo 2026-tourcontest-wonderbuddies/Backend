@@ -106,10 +106,8 @@ def recalc_first_and_last_item_travel(course) -> None:
                     day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
                 )
                 arrive_at = day_start + timedelta(minutes=travel_min_in)
+                stay_duration = first_item.stay_min if first_item.stay_min is not None else first_item.place.stay_time_minutes
                 depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
-            
-            arrive_at = day_start + timedelta(minutes=travel_min_in)
-            depart_at = arrive_at + timedelta(minutes=first_item.place.stay_time_minutes)
 
             first_item.travel_min_from_prev = travel_min_in
             first_item.arrive_at = arrive_at
@@ -222,7 +220,8 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
             current_time += timedelta(minutes=travel_min)
             item.arrive_at = current_time
             item.travel_min_from_prev = travel_min
-            current_time += timedelta(minutes=item.place.stay_time_minutes)
+            stay_duration = item.stay_min if item.stay_min is not None else item.place.stay_time_minutes
+            current_time += timedelta(minutes=stay_duration)
             item.depart_at = current_time
             item.save(update_fields=["arrive_at", "depart_at", "travel_min_from_prev"])
 
@@ -316,6 +315,7 @@ def regenerate_unlocked_segment(day: ItineraryDay, purpose_main: str, purpose_su
                 day=day, order=order, place=chunk_item["place"], slot_type="GENERAL",
                 arrive_at=start_time, depart_at=start_time,   # 임시값, 아래에서 재계산으로 확정
                 travel_min_from_prev=0,
+                stay_min=chunk_item["stay_min"], 
             )
             order += 1
 
