@@ -136,7 +136,8 @@ def _assign_extras_to_segments(extra_types: list[str], chunk_targets: list[int])
 def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk_target, mode,
                         purpose_main, purpose_sub, exclude_categories,
                         region_quadrant, visit_start_dt, get_travel_time_fn, get_stay_time_fn,
-                        visited_across_days, nlp_scores, popular_quota=0):
+                        visited_across_days, nlp_scores, popular_quota=0,
+                        airport_deadline_dt=None, matrix_ids=None):
     if chunk_target <= 0 or chunk_avail_hours <= 0:
         return None
     courses = beam_search_day(
@@ -148,7 +149,7 @@ def _run_general_chunk(all_general_places, start_place, chunk_avail_hours, chunk
         visit_start_datetime=visit_start_dt,
         get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
         need_lunch=False, need_dinner=False, visited_across_days=visited_across_days,
-        popular_quota=popular_quota,
+        popular_quota=popular_quota, airport_deadline_dt=airport_deadline_dt, matrix_ids=matrix_ids, 
     )
     return select_best_course(courses, chunk_avail_hours, mode)
 
@@ -264,6 +265,9 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
             key=lambda x: x[1][0]
         )
         meal_count = len(meal_segments)
+
+        day_end_kst = _combine_date_and_time(trip.start_date, day_index, schedule["end_time"])
+        avail = calc_avail_hours_from_schedule(day_index, total_days, day_start_kst, day_end_kst)
 
         # 야간 후보가 없으면 야간 슬롯(+1)도 만들지 않는다.
         night_pool = _night_pool(all_general_places, quadrant, visited_across_days) if avail.need_night_spot else []
@@ -393,11 +397,18 @@ def generate_one_course(trip: TripRequest, routing_engine, mode: str) -> Recomme
                     remain_min = (seg_end_dt - current_time).total_seconds() / 60
                     if kind == "general" and is_night_seg and remain_min < NIGHT_TAIL_MIN:
                         break
+
+                    is_last_day = (day_index == total_days)
+                    is_final_tour_segment = (event is last_tour_event)
+                    airport_deadline = day_end_kst if (is_last_day and is_final_tour_segment and kind == "general") else None
+                    
                     best_chunk = _run_general_chunk(
                         pass_places, current_place, max(0.0, remain_min) / 60, pass_target, mode,
                         day_purpose_main, day_purpose_sub, day_exclude,
                         pass_quadrant, current_time, get_travel_time_fn, get_stay_time_fn,
                         visited_across_days, nlp_scores, popular_quota=min(pass_quota, pass_target),
+                        airport_deadline_dt=airport_deadline,
+                        matrix_ids=matrix_ids,
                     )
                     chunk_items = list(best_chunk.items) if best_chunk else []
 

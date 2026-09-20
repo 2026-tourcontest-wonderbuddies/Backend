@@ -105,6 +105,9 @@ def beam_search_day(
     visited_across_days: set[str] = None,
     nlp_match_score: float | None = None,
     popular_quota: int = 0,
+    airport_deadline_dt=None,
+    matrix_ids: set | None = None,
+
 ) -> list[PartialCourse]:
     """
     5.4 빔서치 본체. 완성 코스 최대 BEAM_WIDTH개를 반환한다.
@@ -156,6 +159,8 @@ def beam_search_day(
                 get_travel_time_fn=get_travel_time_fn,
                 get_stay_time_fn=get_stay_time_fn,
                 mode=mode,
+                airport_deadline_dt=airport_deadline_dt,
+                matrix_ids=matrix_ids,
             )
 
             # 인기 장소 쿼터 강제: 남은 슬롯 안에 쿼터를 못 채울 시점이 되면 후보를
