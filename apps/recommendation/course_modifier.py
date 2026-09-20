@@ -244,14 +244,14 @@ def resequence_orders(day: ItineraryDay) -> None:
 # 무거운 재계산: 고정 안 된 구간만 빔서치로 장소 자체를 다시 고름
 
 def regenerate_unlocked_segment(day: ItineraryDay, purpose_main: str, purpose_sub: str,
-                                 mode: str, extra_exclude_ids: set[str] = None) -> None:
+                                 mode: str, extra_exclude_ids: set[str] = None) -> dict:
     """
-    day.items 중 locked=False인 연속 구간을 찾아서, 그 구간만 beam_search_day로
-    다시 채운다. locked=True인 항목들은 위치·장소 그대로 유지하고, 그 사이 시간을
-    예산으로 삼아 그 구간만 새로 탐색한다.
+    day.items 중 다시 뽑아도 되는 항목(GENERAL이면서 locked=False)만 beam_search_day로
+    새로 채운다. 고정 항목과 식사 슬롯은 장소·위치·시각 그대로 남긴다.
 
-    단순화: "고정 항목이 하나라도 있으면, 그 고정 항목들 뒤쪽 전체를 한 구간으로
-    다시 채운다" (여러 고정 항목 사이사이를 정교하게 나누는 건 후속 개선 과제로 남김 — 여러 세그먼트 분할은 로직이 급격히 복잡해지고, 실무에서 "장소 하나 유지 + 나머지 재추천" 패턴이 대다수라 이 단순화로 충분함)
+    남겨둔 항목이 하루를 여러 조각으로 쪼개므로 구간별로 따로 탐색한다. 구간의 예산은
+    "앞 항목이 끝나는 시각 ~ 뒤 항목이 시작하는 시각"이다. 이렇게 나누지 않고 하루치
+    예산을 통째로 주면, 체류가 긴 장소 하나를 골라 고정된 식사 시각을 덮어버린다.
     """
     from apps.places.models import Place
 
@@ -260,65 +260,173 @@ def regenerate_unlocked_segment(day: ItineraryDay, purpose_main: str, purpose_su
     get_stay_time_fn = lambda p: p.stay_time_minutes
 
     items = list(day.items.order_by("order"))
-    locked_items = [i for i in items if i.locked]
-    unlocked_items = [i for i in items if not i.locked]
+
+    # 식사 슬롯은 고정 항목과 똑같이 취급한다. 시각이 시간대에 묶여 있는 데다
+    # 후보 풀에 음식점이 없어서, 다시 뽑게 두면 그 날 식사가 통째로 사라진다.
+    # (사용자가 "그 식당 빼줘"라고 하면 호출부가 먼저 지우므로 여기까지 오지 않는다.)
+    def _kept(item) -> bool:
+        return item.locked or item.slot_type != "GENERAL"
+
+    kept_items = [i for i in items if _kept(i)]
+    unlocked_items = [i for i in items if not _kept(i)]
 
     if not unlocked_items:
         return {"ok": True, "regenerated": 0}
 
-    first_unlocked_order = unlocked_items[0].order
-    last_locked_before = None
-    for it in items:
-        if it.order < first_unlocked_order and it.locked:
-            last_locked_before = it
-
-    start_place = last_locked_before.place if last_locked_before else None
-    start_time = last_locked_before.depart_at.astimezone(KST) if last_locked_before else (
-        day.course.trip.start_datetime.astimezone(KST).replace(
-            hour=day.avail_start_min // 60, minute=day.avail_start_min % 60
-        )
+    target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+    day_start = datetime(
+        target_date.year, target_date.month, target_date.day,
+        day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
     )
-    day_end_min = day.avail_start_min + int(day.avail_hours * 60)
-    remain_hours = max(0.0, (day_end_min - (start_time.hour * 60 + start_time.minute)) / 60)
+    day_end = day_start + timedelta(hours=day.avail_hours)
 
-    exclude_ids = {i.place.content_id for i in locked_items}
+    # 남겨둔 항목을 경계로 구간을 나눈다. 각 구간은 연속한 재생성 대상 한 묶음이다.
+    segments = []
+    group, prev_kept = [], None
+    for it in items:
+        if _kept(it):
+            if group:
+                segments.append((group, prev_kept, it))
+                group = []
+            prev_kept = it
+        else:
+            group.append(it)
+    if group:
+        segments.append((group, prev_kept, None))
+
+    matrix_ids = set(routing_engine._pos.keys())
+    exclude_ids = {i.place.content_id for i in kept_items}
     if extra_exclude_ids:
         exclude_ids |= extra_exclude_ids
 
-    matrix_ids = set(routing_engine._pos.keys())
-    candidate_pool = list(
+    base_pool = list(
         Place.objects.exclude(content_type_name="음식점")
         .filter(content_id__in=matrix_ids)
         .exclude(content_id__in=exclude_ids)
     )
 
-    beams = beam_search_day(
-        candidate_pool=candidate_pool, start_place=start_place,
-        avail_hours=remain_hours, target_slots=len(unlocked_items), mode=mode,
-        purpose_main=purpose_main, purpose_sub=purpose_sub,
-        transport_mode=DEFAULT_VEHICLE, region_quadrant=None,
-        exclude_place_ids=[], exclude_categories=[],
-        visit_start_datetime=start_time,
-        get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
-        visited_across_days=exclude_ids,
-    )
-    best = select_best_course(beams, remain_hours, mode)
+    first_unlocked_order = unlocked_items[0].order
+    filled = []   # [(order, place, stay_min)] — 비운 자리를 그대로 재사용한다
 
-    # 기존 unlocked 항목들 삭제 후, 새로 채운 것으로 교체
+    for group, prev_kept, next_kept in segments:
+        start_place = prev_kept.place if prev_kept else None
+        start_time = prev_kept.depart_at.astimezone(KST) if prev_kept else day_start
+        end_time = next_kept.arrive_at.astimezone(KST) if next_kept else day_end
+        avail_hours = (end_time - start_time).total_seconds() / 3600
+        if avail_hours <= 0:
+            continue   # 앞뒤 항목이 붙어 있으면 그 사이에 넣을 자리가 없다
+
+        beams = beam_search_day(
+            candidate_pool=[p for p in base_pool if p.content_id not in exclude_ids],
+            start_place=start_place,
+            avail_hours=avail_hours, target_slots=len(group), mode=mode,
+            purpose_main=purpose_main, purpose_sub=purpose_sub,
+            transport_mode=DEFAULT_VEHICLE, region_quadrant=None,
+            exclude_place_ids=[], exclude_categories=[],
+            visit_start_datetime=start_time,
+            get_travel_time_fn=get_travel_time_fn, get_stay_time_fn=get_stay_time_fn,
+            visited_across_days=exclude_ids,
+        )
+        best = select_best_course(beams, avail_hours, mode)
+        if not best:
+            continue
+        for item, chunk_item in zip(group, best.items):
+            filled.append((item.order, chunk_item["place"], chunk_item["stay_min"]))
+            # 뒤 구간이 같은 곳을 또 고르지 않게 누적한다.
+            exclude_ids.add(chunk_item["place"].content_id)
+
     for it in unlocked_items:
         it.delete()
 
-    order = first_unlocked_order
-    if best:
-        for chunk_item in best.items:
-            ItineraryItem.objects.create(
-                day=day, order=order, place=chunk_item["place"], slot_type="GENERAL",
-                arrive_at=start_time, depart_at=start_time,   # 임시값, 아래에서 재계산으로 확정
-                travel_min_from_prev=0,
-                stay_min=chunk_item["stay_min"], 
-            )
-            order += 1
+    for order, place, stay_min in filled:
+        ItineraryItem.objects.create(
+            day=day, order=order, place=place, slot_type="GENERAL",
+            arrive_at=day_start, depart_at=day_start,   # 임시값, 아래에서 재계산으로 확정
+            travel_min_from_prev=0,
+            # 빔서치가 고른 체류시간을 그대로 보관한다. recalc_timeline_from이
+            # place.stay_time_minutes 대신 이 값을 우선 쓴다.
+            stay_min=stay_min,
+        )
 
     resequence_orders(day)
     recalc_timeline_from(day, start_order=first_unlocked_order)
-    return {"ok": True, "regenerated": order - first_unlocked_order}
+    return {"ok": True, "regenerated": len(filled)}
+
+
+# 식사 슬롯 교체: 시각이 시간대에 묶여 있어 장소만 갈아 끼우면 된다.
+
+def replace_meal_place(item: ItineraryItem, purpose_main: str, purpose_sub: str,
+                       mode: str, exclude_ids: set[str] | None = None) -> bool:
+    """
+    식사 슬롯의 장소를 다른 식당으로 바꾼다. 도착·출발 시각은 그 시간대에 고정된 값이라
+    그대로 두고, 이동시간만 다시 계산한다.
+
+    쓸 만한 후보가 없으면(권역이 좁거나 그 시각에 문 연 곳이 없으면) 아무것도 바꾸지 않고
+    False를 돌려준다 — 호출부가 그냥 빼는 기존 동작으로 떨어지면 된다.
+    """
+    from apps.recommendation.engine import _get_cached_places
+    from apps.recommendation.filters import is_open_at
+    from apps.recommendation.food_scoring import (
+        MEAL_CAPABLE_ROLES, build_meal_candidates, score_food_candidates,
+    )
+
+    day = item.day
+    trip = day.course.trip
+    routing_engine = get_routing_engine()
+    matrix_ids = set(routing_engine._pos.keys())
+    _, all_food_places = _get_cached_places(matrix_ids)
+
+    # 권역은 그 날 설정이 우선이고 없으면 여행 전체 설정 — 엔진이 코스를 만들 때와 같은 규칙이다.
+    schedule = next((s for s in (trip.day_schedules or []) if s.get("day_index") == day.day_index), {})
+    day_region = schedule.get("region_preference") or trip.region_preference
+    quadrant = None if day_region == "ALL" else day_region
+
+    visit_at = item.arrive_at.astimezone(KST)
+    candidates, relaxed_ids = build_meal_candidates(
+        all_food_places, quadrant, visit_at,
+        trip.food_pref_1, trip.food_pref_2, "",
+        is_open_at_fn=is_open_at,
+    )
+
+    # 후보 생성기는 "이 코스가 이미 쓴 식당"을 모른다 — 중복은 여기서 걸러낸다.
+    blocked = set(exclude_ids or ()) | {item.place.content_id}
+    pool = [
+        p for p in candidates
+        if p.food_role in MEAL_CAPABLE_ROLES
+        and p.content_id not in blocked
+        and p.content_id in matrix_ids
+    ]
+    if not pool:
+        return False
+
+    prev = day.items.filter(order__lt=item.order).order_by("-order").first()
+    slot_min = (item.depart_at - item.arrive_at).total_seconds() / 60
+
+    if prev is None:
+        # 그 날 첫 일정이면 기준점이 공항이라 이동시간으로 줄 세울 수 없다(엔진도 같은 처리).
+        chosen_place = pool[0]
+        travel_min = snap_travel_time_5min(
+            estimate_airport_travel_min(chosen_place.latitude, chosen_place.longitude, DEFAULT_VEHICLE)
+        )
+        is_relaxed = chosen_place.content_id in relaxed_ids
+    else:
+        ranked = score_food_candidates(
+            pool, prev.place, purpose_main, purpose_sub, mode, slot_min,
+            _get_travel_time_fn(routing_engine),
+            relaxed_ids=relaxed_ids, visit_datetime=visit_at,
+        )
+        if not ranked:
+            return False
+        chosen_place = ranked[0]["place"]
+        travel_min = snap_travel_time_5min(ranked[0]["travel_min"])
+        is_relaxed = ranked[0].get("is_relaxed", False)
+
+    item.place = chosen_place
+    item.travel_min_from_prev = travel_min
+    item.is_relaxed_preference = is_relaxed
+    item.save(update_fields=["place", "travel_min_from_prev", "is_relaxed_preference"])
+
+    # regenerate_unlocked_segment는 다시 뽑을 관광지가 없으면 바로 끝나서 시각을 손대지 않는다.
+    # 새 식당까지의 이동시간과 뒤 일정이 어긋나지 않게 여기서 직접 다시 맞춘다.
+    recalc_timeline_from(day, start_order=max(item.order - 1, 0))
+    return True
