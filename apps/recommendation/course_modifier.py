@@ -121,35 +121,51 @@ def recalc_first_and_last_item_travel(course) -> None:
                 day.airport_to_first_travel_min = travel_min_in
                 day.save(update_fields=["airport_to_first_travel_min"])
 
-        # 2. 마지막 항목 → 숙소/공항 
-        if i == total_days - 1:
-            if airport_available and last_item.place.content_id in matrix_ids:
-                # OSRM 실측값 사용
-                result = routing_engine.get_travel_time(
-                    last_item.place.content_id, JEJU_AIRPORT_PROXY_CONTENT_ID,
-                    mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=last_item.depart_at,
-                )
+        # 2. 마지막 항목 → 숙소/공항
+        recalc_last_item_travel_out(day, is_last_day=(i == total_days - 1))
+
+
+def recalc_last_item_travel_out(day: ItineraryDay, is_last_day: bool | None = None) -> None:
+    """그날 마지막 장소 → 숙소(마지막 날은 공항) 이동시간(day.travel_to_next_min)을 지금 마지막 장소 기준으로 다시 저장한다.
+    장소 추가·삭제·순서 변경으로 마지막 장소가 바뀌어도 옛 장소 기준 값이 남지 않게 recalc_timeline_from이 부른다."""
+    last_item = day.items.order_by("-order").first()
+    if last_item is None:
+        return
+    if is_last_day is None:
+        is_last_day = not day.course.days.filter(day_index__gt=day.day_index).exists()
+
+    routing_engine = get_routing_engine()
+    matrix_ids = set(routing_engine._pos.keys())
+    airport_available = JEJU_AIRPORT_PROXY_CONTENT_ID in matrix_ids
+
+    if is_last_day:
+        if airport_available and last_item.place.content_id in matrix_ids:
+            # OSRM 실측값 사용
+            result = routing_engine.get_travel_time(
+                last_item.place.content_id, JEJU_AIRPORT_PROXY_CONTENT_ID,
+                mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=last_item.depart_at,
+            )
+            travel_min_out = result["duration_min_adjusted"]
+        else:
+            travel_min_out = estimate_airport_travel_min(
+                last_item.place.latitude, last_item.place.longitude, DEFAULT_VEHICLE
+            )
+    else:
+        lodging = day.lodging_snapshot   # 이건 그대로 맞음 (오늘 밤 묵을 숙소)
+        if not lodging:
+            travel_min_out = None
+        else:
+            lodging_content_id = lodging.get("content_id")
+            if lodging_content_id and lodging_content_id in matrix_ids and last_item.place.content_id in matrix_ids:
+                result = routing_engine.get_travel_time(last_item.place.content_id, lodging_content_id,
+                                                          mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=last_item.depart_at)
                 travel_min_out = result["duration_min_adjusted"]
             else:
-                travel_min_out = estimate_airport_travel_min(
-                    last_item.place.latitude, last_item.place.longitude, DEFAULT_VEHICLE
-                )
-        else:
-            lodging = day.lodging_snapshot   # 이건 그대로 맞음 (오늘 밤 묵을 숙소)
-            if not lodging:
-                travel_min_out = None
-            else:
-                lodging_content_id = lodging.get("content_id")
-                if lodging_content_id and lodging_content_id in matrix_ids and last_item.place.content_id in matrix_ids:
-                    result = routing_engine.get_travel_time(last_item.place.content_id, lodging_content_id,
-                                                              mode="osrm", vehicle=DEFAULT_VEHICLE, depart_at=last_item.depart_at)
-                    travel_min_out = result["duration_min_adjusted"]
-                else:
-                    travel_min_out = _travel_from_coords(lodging["lat"], lodging["lon"], last_item.place, DEFAULT_VEHICLE)
+                travel_min_out = _travel_from_coords(lodging["lat"], lodging["lon"], last_item.place, DEFAULT_VEHICLE)
 
-        if travel_min_out is not None:
-            day.travel_to_next_min = snap_travel_time_5min(travel_min_out)
-            day.save(update_fields=["travel_to_next_min"])
+    if travel_min_out is not None:
+        day.travel_to_next_min = snap_travel_time_5min(travel_min_out)
+        day.save(update_fields=["travel_to_next_min"])
 
 # 장소 그대로, 시간만 순서대로 다시 채우기
 def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
@@ -164,6 +180,7 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
 
     items = list(day.items.order_by("order"))
     if start_order >= len(items):
+        recalc_last_item_travel_out(day)
         return {"ok": True, "over_budget": False}
 
     if start_order == 0:
@@ -188,7 +205,12 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
         prev_place = items[start_order - 1].place
         prev_lodging = None
 
-    day_end_min = day.avail_start_min + int(day.avail_hours * 60)
+    # 시·분만 비교하면 자정을 넘긴 일정(00:30)이 이른 시각으로 읽혀 초과가 안 잡힌다. 날짜까지 든 시각으로 비교한다.
+    target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+    day_end = datetime(
+        target_date.year, target_date.month, target_date.day,
+        day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST,
+    ) + timedelta(minutes=int(day.avail_hours * 60))
 
     for idx, item in enumerate(items[start_order:]):
         is_first_in_range = (idx == 0)
@@ -227,8 +249,8 @@ def recalc_timeline_from(day: ItineraryDay, start_order: int = 0) -> dict:
 
         prev_place = item.place
 
-    finish_min = current_time.hour * 60 + current_time.minute
-    over_budget = finish_min > day_end_min
+    recalc_last_item_travel_out(day)
+    over_budget = current_time > day_end
     return {"ok": True, "over_budget": over_budget}
 
 
