@@ -340,21 +340,33 @@ class CourseItemAddView(APIView):
             return Response({"error": f"이 장소({place.title})는 이동시간 계산이 불가능해 추가할 수 없습니다."},
                              status=status.HTTP_400_BAD_REQUEST)
 
-        for it in list(day.items.filter(order__gte=insert_order).order_by("-order")):   # ★ list()로 감싸서 안전하게
-            it.order += 1
-            it.save(update_fields=["order"])
+        # 같은 장소를 한 코스에 두 번 넣지 않는다(다른 Day에 있어도 막는다).
+        if ItineraryItem.objects.filter(day__course_id=course_id, place=place).exists():
+            return Response({"error": f"{place.title}은(는) 이미 이 코스에 있어요."},
+                             status=status.HTTP_400_BAD_REQUEST)
 
-        # ★ 수정: trip.start_datetime 대신, 그날 날짜+시작시각 조합으로 임시값 생성 (recalc_timeline_from이 바로 덮어씀)
-        target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
-        temp_dt = datetime(target_date.year, target_date.month, target_date.day,
-                            day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST)
+        # 넣어본 뒤 가용시간을 넘으면 통째로 되돌린다(순서 밀기·생성·재계산 모두).
+        with transaction.atomic():
+            for it in list(day.items.filter(order__gte=insert_order).order_by("-order")):   # ★ list()로 감싸서 안전하게
+                it.order += 1
+                it.save(update_fields=["order"])
 
-        ItineraryItem.objects.create(
-            day=day, order=insert_order, place=place, slot_type="GENERAL",
-            arrive_at=temp_dt, depart_at=temp_dt,
-            travel_min_from_prev=0,
-        )
-        result = recalc_timeline_from(day, start_order=max(insert_order - 1, 0))
+            # ★ 수정: trip.start_datetime 대신, 그날 날짜+시작시각 조합으로 임시값 생성 (recalc_timeline_from이 바로 덮어씀)
+            target_date = day.course.trip.start_date + timedelta(days=day.day_index - 1)
+            temp_dt = datetime(target_date.year, target_date.month, target_date.day,
+                                day.avail_start_min // 60, day.avail_start_min % 60, tzinfo=KST)
+
+            ItineraryItem.objects.create(
+                day=day, order=insert_order, place=place, slot_type="GENERAL",
+                arrive_at=temp_dt, depart_at=temp_dt,
+                travel_min_from_prev=0,
+            )
+            result = recalc_timeline_from(day, start_order=max(insert_order - 1, 0))
+            if result["over_budget"]:
+                transaction.set_rollback(True)
+                return Response({"error": f"{place.title}을(를) 넣으면 DAY {day_index} 가용 시간({day.avail_hours:g}시간)을 넘어서 추가할 수 없어요. "
+                                          "다른 장소를 빼거나 체류가 짧은 곳을 골라 주세요."},
+                                 status=status.HTTP_400_BAD_REQUEST)
         return Response({
             "added": True, "day_index": day_index,
             "over_budget": result["over_budget"],
